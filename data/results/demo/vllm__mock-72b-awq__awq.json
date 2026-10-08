@@ -1,0 +1,329 @@
+{
+  "run_id": "demo",
+  "engine": "vllm",
+  "model": "mock-72b-awq",
+  "base_url": "http://127.0.0.1:8102",
+  "result_stem": "vllm__mock-72b-awq__awq",
+  "quantization": "awq",
+  "note": "",
+  "generated_at": "2026-10-08T13:16:44+08:00",
+  "duration_seconds": 8.08,
+  "config": {
+    "concurrency_levels": [
+      1,
+      2,
+      4,
+      8,
+      16,
+      32
+    ],
+    "max_tokens": 64,
+    "warmup_requests": 1,
+    "temperature": 0.0,
+    "stream": true,
+    "timeout": 120.0,
+    "prompt": "请用三句话说明什么是张量并行（Tensor Parallelism）。"
+  },
+  "environment": {
+    "platform": "Windows-11-10.0.22631-SP0",
+    "python": "3.13.14",
+    "processor": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
+    "machine": "AMD64",
+    "hostname": "LAPTOP-wgsgh"
+  },
+  "health": {
+    "ok": true,
+    "models": [
+      "mock-72b",
+      "another-model"
+    ],
+    "model_loaded": true,
+    "error": null
+  },
+  "summary": {
+    "best_throughput": 1874.0634829869134,
+    "best_throughput_concurrency": 32,
+    "lowest_ttft": 0.09723529999973834,
+    "lowest_ttft_concurrency": 1,
+    "max_concurrency_tested": 32,
+    "unstable_stages": []
+  },
+  "stages": [
+    {
+      "concurrency": 1,
+      "total_requests": 1,
+      "success_requests": 1,
+      "failed_requests": 0,
+      "failure_rate": 0.0,
+      "unstable": false,
+      "latency": {
+        "mean": 0.7827420999965398,
+        "p50": 0.7827420999965398,
+        "p95": 0.7827420999965398,
+        "p99": 0.7827420999965398,
+        "min": 0.7827420999965398,
+        "max": 0.7827420999965398,
+        "stdev": null
+      },
+      "ttft": {
+        "mean": 0.09723529999973834,
+        "p50": 0.09723529999973834,
+        "p95": 0.09723529999973834,
+        "p99": 0.09723529999973834
+      },
+      "tpot": {
+        "mean": 0.010881060317409546,
+        "p50": 0.010881060317409546,
+        "p95": 0.010881060317409546,
+        "p99": 0.010881060317409546
+      },
+      "throughput": {
+        "output_tokens_total": 64,
+        "input_tokens_total": 11,
+        "output_tokens_per_second": 81.35820402803816,
+        "total_tokens_per_second": 95.34164534535721,
+        "per_request_output_tps_mean": 81.76384022308615
+      },
+      "timing": {
+        "wall_time": 0.7866446999978507,
+        "request_rate": 1.2712219379380962
+      },
+      "errors": {
+        "count": 0,
+        "breakdown": {},
+        "samples": []
+      }
+    },
+    {
+      "concurrency": 2,
+      "total_requests": 2,
+      "success_requests": 2,
+      "failed_requests": 0,
+      "failure_rate": 0.0,
+      "unstable": false,
+      "latency": {
+        "mean": 0.7826039999999921,
+        "p50": 0.7826039999999921,
+        "p95": 0.8083833299995604,
+        "p99": 0.810674825999522,
+        "min": 0.7539603000004718,
+        "max": 0.8112476999995124,
+        "stdev": 0.040508309015867855
+      },
+      "ttft": {
+        "mean": 0.1055194999989908,
+        "p50": 0.1055194999989908,
+        "p95": 0.1320652699983839,
+        "p99": 0.13442489399832994
+      },
+      "tpot": {
+        "mean": 0.01074737301588891,
+        "p50": 0.01074737301588891,
+        "p95": 0.010759538730171842,
+        "p99": 0.010760620126996993
+      },
+      "throughput": {
+        "output_tokens_total": 128,
+        "input_tokens_total": 22,
+        "output_tokens_per_second": 157.35931401168642,
+        "total_tokens_per_second": 184.40544610744504,
+        "per_request_output_tps_mean": 81.88796530491078
+      },
+      "timing": {
+        "wall_time": 0.8134250000002794,
+        "request_rate": 2.4587392814326003
+      },
+      "errors": {
+        "count": 0,
+        "breakdown": {},
+        "samples": []
+      }
+    },
+    {
+      "concurrency": 4,
+      "total_requests": 4,
+      "success_requests": 4,
+      "failed_requests": 0,
+      "failure_rate": 0.0,
+      "unstable": false,
+      "latency": {
+        "mean": 0.8055899500004671,
+        "p50": 0.8107233500013535,
+        "p95": 0.841299335000258,
+        "p99": 0.843848507000257,
+        "min": 0.7564272999989043,
+        "max": 0.8444858000002569,
+        "stdev": 0.03784188659105571
+      },
+      "ttft": {
+        "mean": 0.12632817500070814,
+        "p50": 0.13006470000073023,
+        "p95": 0.16353002000105332,
+        "p99": 0.16670008400134975
+      },
+      "tpot": {
+        "mean": 0.01078193293650411,
+        "p50": 0.010776877777768985,
+        "p95": 0.010820868333350863,
+        "p99": 0.010826615571448721
+      },
+      "throughput": {
+        "output_tokens_total": 256,
+        "input_tokens_total": 44,
+        "output_tokens_per_second": 301.83692529135436,
+        "total_tokens_per_second": 353.7151468258059,
+        "per_request_output_tps_mean": 79.57884518299434
+      },
+      "timing": {
+        "wall_time": 0.8481400999990001,
+        "request_rate": 4.716201957677412
+      },
+      "errors": {
+        "count": 0,
+        "breakdown": {},
+        "samples": []
+      }
+    },
+    {
+      "concurrency": 8,
+      "total_requests": 8,
+      "success_requests": 8,
+      "failed_requests": 0,
+      "failure_rate": 0.0,
+      "unstable": false,
+      "latency": {
+        "mean": 0.8371044000000438,
+        "p50": 0.8466539500004728,
+        "p95": 0.8757678350018978,
+        "p99": 0.8781898070026364,
+        "min": 0.7585287000001699,
+        "max": 0.878795300002821,
+        "stdev": 0.040755017143336486
+      },
+      "ttft": {
+        "mean": 0.15803797499984285,
+        "p50": 0.1674177500008227,
+        "p95": 0.19574066000004678,
+        "p99": 0.19834813200042845
+      },
+      "tpot": {
+        "mean": 0.010778832142860333,
+        "p50": 0.010782661904765215,
+        "p95": 0.010797236904785215,
+        "p99": 0.010800181349223994
+      },
+      "throughput": {
+        "output_tokens_total": 512,
+        "input_tokens_total": 88,
+        "output_tokens_per_second": 552.4913746068598,
+        "total_tokens_per_second": 647.4508296174139,
+        "per_request_output_tps_mean": 76.6203054607771
+      },
+      "timing": {
+        "wall_time": 0.9267112999987148,
+        "request_rate": 8.632677728232185
+      },
+      "errors": {
+        "count": 0,
+        "breakdown": {},
+        "samples": []
+      }
+    },
+    {
+      "concurrency": 16,
+      "total_requests": 16,
+      "success_requests": 16,
+      "failed_requests": 0,
+      "failure_rate": 0.0,
+      "unstable": false,
+      "latency": {
+        "mean": 0.8716452187502455,
+        "p50": 0.8802426500005822,
+        "p95": 0.9312105249991873,
+        "p99": 0.9374645050003892,
+        "min": 0.7554035999964981,
+        "max": 0.9390280000006896,
+        "stdev": 0.050418146775784545
+      },
+      "ttft": {
+        "mean": 0.19401033750045826,
+        "p50": 0.20347505000063393,
+        "p95": 0.2520076499986317,
+        "p99": 0.25869560999963137
+      },
+      "tpot": {
+        "mean": 0.010756109226187098,
+        "p50": 0.01075593730159213,
+        "p95": 0.010777749206320708,
+        "p99": 0.010782644444444732
+      },
+      "throughput": {
+        "output_tokens_total": 1024,
+        "input_tokens_total": 176,
+        "output_tokens_per_second": 1046.0485057973979,
+        "total_tokens_per_second": 1225.8380927313258,
+        "per_request_output_tps_mean": 73.66689278630602
+      },
+      "timing": {
+        "wall_time": 0.9789221000028192,
+        "request_rate": 16.34450790308434
+      },
+      "errors": {
+        "count": 0,
+        "breakdown": {},
+        "samples": []
+      }
+    },
+    {
+      "concurrency": 32,
+      "total_requests": 32,
+      "success_requests": 32,
+      "failed_requests": 0,
+      "failure_rate": 0.0,
+      "unstable": false,
+      "latency": {
+        "mean": 0.9056540531249766,
+        "p50": 0.918776649999927,
+        "p95": 0.9547425299995667,
+        "p99": 0.9660278570006995,
+        "min": 0.7604117999981099,
+        "max": 0.970887200001016,
+        "stdev": 0.04936648499428172
+      },
+      "ttft": {
+        "mean": 0.22784756874955292,
+        "p50": 0.23988439999993716,
+        "p95": 0.2773617449989615,
+        "p99": 0.2878226600006019
+      },
+      "tpot": {
+        "mean": 0.010758833085324186,
+        "p50": 0.010754864285690783,
+        "p95": 0.010810212222243116,
+        "p99": 0.010819924873019136
+      },
+      "throughput": {
+        "output_tokens_total": 2048,
+        "input_tokens_total": 352,
+        "output_tokens_per_second": 1874.0634829869134,
+        "total_tokens_per_second": 2196.168144125289,
+        "per_request_output_tps_mean": 70.88602282982411
+      },
+      "timing": {
+        "wall_time": 1.0928124999991269,
+        "request_rate": 29.282241921670522
+      },
+      "errors": {
+        "count": 0,
+        "breakdown": {},
+        "samples": []
+      }
+    }
+  ],
+  "vram_curve": {
+    "available": false,
+    "gpus": [],
+    "message": "未启用 GPU 监控"
+  },
+  "vram_peak_mib": null
+}
