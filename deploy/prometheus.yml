@@ -1,0 +1,22 @@
+# Prometheus 抓取配置
+global:
+  scrape_interval: 5s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: llm-inference-bench
+
+scrape_configs:
+  # 压测服务自身暴露的指标
+  - job_name: llmbench
+    static_configs:
+      - targets: ["bench-api:8080"]
+    metrics_path: /metrics
+
+  # 若 vLLM 开了 --enable-metrics，可额外抓它原生的 /metrics
+  # 那里的指标（vllm:num_requests_running 等）能补充队列视角
+  - job_name: vllm
+    static_configs:
+      - targets: ["host.docker.internal:8000"]
+    metrics_path: /metrics
+    # 抓不到不影响，Prometheus 会标 target down
+    honor_labels: true
