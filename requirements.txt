@@ -1,0 +1,19 @@
+# 核心依赖
+# OpenAI 兼容客户端：vLLM 与 Ollama 都通过它接入，无需为两种引擎各写一套协议
+openai>=1.30.0
+# HTTP 客户端（流式读取 / 健康探测）
+httpx>=0.27.0
+# 数据聚合
+numpy>=1.26.0
+pandas>=2.1.0
+# 配置
+python-dotenv>=1.0.0
+
+# 服务层
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+# Prometheus 指标暴露
+prometheus-client>=0.20.0
+
+# 可视化报告
+jinja2>=3.1.0

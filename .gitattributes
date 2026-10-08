@@ -1,0 +1,21 @@
+* text=auto eol=lf
+
+# Windows 专用脚本保留 CRLF，避免双击运行出错
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# 二进制文件不做行尾转换
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.gz binary
+*.tar binary
+
+# 压测产物：JSON/CSV 用 LF，保证跨平台 diff 一致
+*.json text eol=lf
+*.csv text eol=lf
