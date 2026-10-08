@@ -1,11 +1,48 @@
 # llm-inference-bench
 
-大模型推理部署与压测评测平台 —— 面向**多引擎、多量化等级**的推理性能横向评测工具。
+**大模型推理压测与评测平台** —— 多引擎、多量化等级的推理性能横向评测工具。
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
+[![Tests](https://img.shields.io/badge/tests-302%20passed-brightgreen.svg)](tests/)
+[![Version](https://img.shields.io/badge/release-v0.1.0-orange.svg)](https://gitee.com/wang-guangshuooo/llm-inference-bench/releases)
 
 一句话定位：**把「部署完大模型之后怎么证明它跑得好」这件事工程化。**
+
 给定若干推理引擎（vLLM / Ollama）和若干量化配置（FP16 / INT8 / AWQ / GPTQ），
 自动做并发梯度压测，采集吞吐、首包延迟、尾延迟、显存占用，产出一份可直接交付客户的
 对比报告，并把指标实时暴露给 Prometheus / Grafana。
+
+### 一屏看懂
+
+```bash
+# 无需 GPU 也能跑通全链路 —— 内置 OpenAI 兼容的 mock 引擎
+pip install -r requirements.txt
+python scripts/mock_engine.py --port 8102 &
+export NO_PROXY="127.0.0.1,localhost"
+export VLLM_BASE_URL="http://127.0.0.1:8102" VLLM_MODEL="mock-72b"
+python scripts/run_bench.py --engine vllm --quant fp16 --levels 1,2,4,8,16,32
+# → data/results/<run>/report.html  （自包含 HTML，隔离内网可直接打开）
+```
+
+| | |
+| --- | --- |
+| **引擎** | vLLM、Ollama，以及任意 OpenAI 兼容端点 |
+| **指标** | 吞吐 tokens/s · TTFT 首包延迟 · TPOT · P50/P95/P99 尾延迟 · 显存峰值 |
+| **量化** | FP16 / BF16 / INT8 / AWQ / GPTQ 横向对比 + 每 GiB 显存吞吐 |
+| **输出** | Markdown 报告 · 自包含 HTML 报告（内联 SVG，无 CDN）· Prometheus 指标 · Grafana 面板 |
+| **验证** | 302 个单元测试，约 13 秒跑完；无 GPU 亦可端到端验证 |
+| **落地** | Docker Compose 一键起监控栈；离线安装与隔离内网可用 |
+
+### 它和「随手写个压测脚本」的区别
+
+- **TTFT 基于流式首个内容分片测量** —— 不是 HTTP 200 到达时刻，否则会漏掉排队与 prefill
+- **TPOT = 生成耗时 / (输出 token − 1)** —— 首个 token 已计入 TTFT，重复计算会低估解码速度
+- **多卡显存峰值按时序求和** —— 取各卡峰值的最大值，8 卡场景会少报 8 倍
+- **每个并发请求独立客户端** —— 复用连接池会把「并发」测成「排队」
+- **报告自包含** —— 客户内网常为物理隔离，带外部依赖的报告打开就是白屏
+
+> 这些口径踩过的坑都写在了 [压测方法论](docs/methodology.md) 里，附推导与常见坑点速查表。
 
 ---
 
@@ -288,7 +325,45 @@ python -m pytest tests -q
 | `test_api.py` | 35 | 端点契约、异步任务生命周期 |
 | `test_config.py` | 33 | 环境变量覆盖、URL 归一化 |
 
-写测试的过程中发现并修掉了 4 个真实缺陷（详见 `CHANGELOG.md`）。
+写测试的过程中发现并修掉了 5 个真实缺陷（详见 [`CHANGELOG.md`](CHANGELOG.md) 的 Fixed 段）：
+
+1. 多卡显存峰值取各卡最大值 → 改为按时间戳求和（8 卡场景原少报 8 倍）
+2. `prometheus_client` 的 `Info.info()` 逐字段调用会整体替换标签集 → 一次传完整字典
+3. 结果文件名只用引擎名，FP16 与 AWQ 互相覆盖 → 改为 `<引擎>__<模型>__<量化>`
+4. 全部请求失败的运行退出码仍为 0（CI 会误判通过）→ 改为返回 2 并打印失败详情
+5. 错误样本列表无上限 → 限制为 5 条，避免结果文件膨胀数十倍
+
+---
+
+## 与相近工具的关系
+
+不是要替代它们，定位不同：
+
+| 工具 | 定位 | 本项目的差异 |
+| --- | --- | --- |
+| `vllm bench` / `vllm benchmark_serving` | vLLM 官方压测脚本 | 只覆盖 vLLM；本项目支持多引擎横向对比，且产出可直接交付的对比报告 |
+| `locust` / `wrk` / `ab` | 通用 HTTP 压测 | 不识别 LLM 语义，拿不到 TTFT / TPOT / token 吞吐，也无法对齐显存曲线 |
+| `genai-perf`（NVIDIA） | LLM 推理性能剖析 | 更侧重单模型深度剖析；本项目侧重**多配置横向对比 + 量化选型决策** |
+| `evalscope`（阿里） | 模型能力评测 | 评的是「模型答得好不好」，本项目评的是「推理跑得快不快」——两者互补 |
+
+本项目特别关注的场景是**私有化交付**：给定几套引擎 + 量化组合，得出「该给客户上哪一套」的结论，并留下一份能放进验收报告的材料。
+
+---
+
+## 参与贡献
+
+欢迎提 Issue 和 PR。开始之前请先读 [`CONTRIBUTING.md`](CONTRIBUTING.md)，
+里面列了 5 条**不能想当然的指标口径**——改动指标相关逻辑前必看，否则很容易改错。
+
+```bash
+# 快捷上手：不需要 GPU
+pip install -r requirements.txt -r requirements-dev.txt
+python -m pytest tests -q          # 302 passed in ~13s
+python scripts/mock_engine.py --port 8102 &
+```
+
+只要发现指标口径有问题、报告有误导性表述，或者在你的硬件上跑出了反直觉的结果，
+都欢迎开 Issue 讨论——**这类反馈比加功能更有价值**。
 
 ---
 
@@ -304,4 +379,5 @@ python -m pytest tests -q
 
 ## License
 
-MIT，见 `LICENSE`。
+MIT，见 [`LICENSE`](LICENSE)。
+
