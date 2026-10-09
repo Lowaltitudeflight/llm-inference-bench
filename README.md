@@ -324,6 +324,10 @@ llm-inference-bench/
 > `_safe_slug` 生成。这不是数据被改过 —— 它本身就是「冒号触发 NTFS 备用数据流」
 > 那个 bug 的现场记录，见 [`CHANGELOG.md`](CHANGELOG.md) 的 Fixed 段。
 
+![RTX 4060 Laptop 真机压测：吞吐在并发 8 饱和，首包延迟持续恶化](docs/images/real-gpu-benchmark-charts.png)
+
+> 一眼看懂：**吞吐到并发 8 就压平了（30.8 tokens/s），首包延迟却从 169 ms 一路涨到 30.8 s。**
+
 **环境与参数**
 
 | 项 | 值 |

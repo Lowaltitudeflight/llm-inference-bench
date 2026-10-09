@@ -62,3 +62,11 @@
 - `report.html` —— 自包含 HTML 报告（下载后直接双击打开，无需联网）
 - `report.md` —— Markdown 版报告
 - `vllm__mock-72b__fp16.json` / `vllm__mock-72b-awq__awq.json` —— 原始结果数据
+
+⚠️ demo 用的是**内置 mock 引擎，延迟是模拟出来的**，只用于验证链路，
+**不能用来推断任何真实硬件性能**。
+
+想看**真机**产物，见 [`data/results/run-20261009-103334/`](../data/results/run-20261009-103334/)
+（RTX 4060 Laptop 8GB + Ollama + `qwen2.5:7b` Q4_K_M 的完整运行），
+含报告、原始 JSON / CSV 与曲线图；摘要与结论见
+[README · 实测数据](../README.md#实测数据)。
