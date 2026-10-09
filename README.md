@@ -35,7 +35,7 @@ python scripts/run_bench.py --engine vllm --quant fp16 --levels 1,2,4,8,16,32
 | **量化** | FP16 / BF16 / INT8 / AWQ / GPTQ 横向对比 + 每 GiB 显存吞吐 |
 | **输出** | Markdown 报告 · 自包含 HTML 报告（内联 SVG，无 CDN）· Prometheus 指标 · Grafana 面板 |
 | **实测** | 已在 RTX 4060 Laptop 8GB 完成**真机**压测：峰值 **30.8 tokens/s**，并发 2 即饱和 —— 见 [实测数据](#实测数据) |
-| **验证** | 313 个单元测试，约 10 秒跑完；无 GPU 亦可端到端验证 |
+| **验证** | 313 个单元测试，约 7 秒跑完；无 GPU 亦可端到端验证 |
 | **落地** | Docker Compose 一键起监控栈；离线安装与隔离内网可用 |
 
 ### 它和「随手写个压测脚本」的区别
@@ -376,7 +376,7 @@ llm-inference-bench/
 python -m pytest tests -q
 ```
 
-313 个测试，约 10 秒跑完，覆盖：
+313 个测试，约 7 秒跑完，覆盖：
 
 | 测试文件 | 用例数 | 重点 |
 | --- | --- | --- |
@@ -423,7 +423,7 @@ python -m pytest tests -q
 ```bash
 # 快捷上手：不需要 GPU
 pip install -r requirements.txt -r requirements-dev.txt
-python -m pytest tests -q          # 313 passed in ~10s
+python -m pytest tests -q          # 313 passed in ~7s
 python scripts/mock_engine.py --port 8102 &
 ```
 
