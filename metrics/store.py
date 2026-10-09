@@ -154,10 +154,16 @@ def _safe_slug(text: str) -> str:
 
     多配置对比时同一引擎会跑多次（不同量化/模型），若文件名只用
     引擎名，后一次会覆盖前一次的结果。因此文件名要带上量化与模型。
+
+    注意：这里**不能**放行冒号。Ollama 的模型名形如 ``qwen2.5:7b``，
+    而 ``:`` 在 Windows 上是 NTFS 的备用数据流（ADS）分隔符——
+    ``ollama__qwen2.5:7b__q4_k_m.json`` 会被写进 ``ollama__qwen2.5``
+    的数据流里，磁盘上只看到一个 0 字节文件，后续按 ``*.json``
+    检索（--report-only / compare）会全部找不到。
     """
     keep = []
     for ch in str(text):
-        if ch.isalnum() or ch in "-_.@:":
+        if ch.isalnum() or ch in "-_.@":
             keep.append(ch)
         else:
             keep.append("_")

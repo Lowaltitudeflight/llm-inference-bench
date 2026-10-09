@@ -22,6 +22,7 @@ from metrics.store import (
     load_latest,
     load_result,
     new_run_id,
+    result_stem,
     save_result,
     stage_rows,
 )
@@ -57,6 +58,53 @@ def _target() -> EngineTarget:
 
 def _bench() -> BenchConfig:
     return BenchConfig(concurrency_levels=[1, 4, 16], max_tokens=256, prompt="test prompt")
+
+
+class TestResultStemFilenameSafety:
+    """落盘文件名必须是跨平台安全的。
+
+    回归背景：Ollama 的模型名形如 ``qwen2.5:7b``。冒号在 Windows 上是
+    NTFS 的**备用数据流（ADS）分隔符**，一旦进入文件名，
+    ``ollama__qwen2.5:7b__q4_k_m.json`` 会被写进 ``ollama__qwen2.5`` 的
+    数据流里——磁盘上只剩一个 0 字节文件，之后按 ``*.json`` 检索
+    （--report-only / compare）全部落空，且 ``os.listdir`` 看不到异常。
+    """
+
+    def test_colon_in_model_name_is_sanitized(self):
+        target = EngineTarget(
+            name="ollama",
+            base_url="http://localhost:11434",
+            model="qwen2.5:7b",
+            quantization="q4_K_M",
+        )
+        stem = result_stem(target)
+        assert ":" not in stem
+        assert stem == "ollama__qwen2.5_7b__q4_k_m"
+
+    @pytest.mark.parametrize("bad", [":", "*", "?", '"', "<", ">", "|", "/", "\\"])
+    def test_no_windows_reserved_chars(self, bad):
+        target = EngineTarget(
+            name="engine",
+            base_url="http://localhost:8000",
+            model=f"model{bad}name",
+            quantization="fp16",
+        )
+        assert bad not in result_stem(target)
+
+    def test_stem_is_usable_as_real_filename(self, tmp_path):
+        """用冒号模型名落盘后，文件必须真的以 .json 出现在目录里。"""
+        target = EngineTarget(
+            name="ollama",
+            base_url="http://localhost:11434",
+            model="qwen2.5:7b",
+            quantization="q4_K_M",
+        )
+        path = tmp_path / f"{result_stem(target)}.json"
+        path.write_text('{"ok": true}', encoding="utf-8")
+
+        listed = [p.name for p in tmp_path.iterdir()]
+        assert f"{result_stem(target)}.json" in listed
+        assert json.loads(path.read_text(encoding="utf-8")) == {"ok": True}
 
 
 class TestRunId:
