@@ -39,3 +39,6 @@ htmlcov/
 *.swp
 *.swo
 .DS_Store
+
+# 例外：真实 GPU 实测样本随仓库发布，作为可复现的实测数据佐证
+!data/results/run-20261009-103334/

@@ -3,6 +3,35 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 与
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### Fixed
+
+- **结果文件在 Windows 上被写进 NTFS 备用数据流，导致数据丢失**
+  `_safe_slug()` 原先放行 `:`，而 Ollama 的模型名形如 `qwen2.5:7b` ——
+  `:` 在 Windows 上是 NTFS 备用数据流（ADS）的分隔符，因此
+  `ollama__qwen2.5:7b__q4_k_m.json` 实际被写进了 `ollama__qwen2.5` 的数据流，
+  目录里只留下一个 0 字节文件。按 `*.json` 检索时结果全部丢失，
+  `--report-only` 与 `/compare` 都会报「无结果」。
+
+  真机跑 `ollama + qwen2.5:7b` 时实际触发；84539 字节的结果 JSON 与
+  2793 字节的 CSV 需要以 `path + ':' + stream` 才能取回。
+  现禁止文件名中出现 `:`，并补充 11 个回归测试。
+
+### Added
+
+- 单元测试 302 → 313 个：新增 `TestResultStemFilenameSafety`，
+  覆盖 Windows 保留字符（`: * ? " < > | / \`）与「生成的 stem 必须能当真实文件名用」。
+- README 新增「实测数据」章节，并随仓库提交一份**真机压测原始产物**
+  （`data/results/run-20261009-103334/`，RTX 4060 Laptop 8GB + ollama +
+  `qwen2.5:7b` Q4_K_M），作为可核对的实测数据佐证。
+
+### Changed
+
+- `.gitignore` 为真机实测产物开例外（原先 `data/results/run-*/` 一律排除）。
+
+---
+
 ## [0.1.0] - 2026-10-08
 
 首个可用版本：从零搭出「多引擎 + 多量化」的大模型推理压测与评测平台。

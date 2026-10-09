@@ -4,7 +4,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/tests-302%20passed-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-313%20passed-brightgreen.svg)](tests/)
 [![Version](https://img.shields.io/badge/release-v0.1.0-orange.svg)](https://gitee.com/wang-guangshuooo/llm-inference-bench/releases)
 
 一句话定位：**把「部署完大模型之后怎么证明它跑得好」这件事工程化。**
@@ -34,7 +34,8 @@ python scripts/run_bench.py --engine vllm --quant fp16 --levels 1,2,4,8,16,32
 | **指标** | 吞吐 tokens/s · TTFT 首包延迟 · TPOT · P50/P95/P99 尾延迟 · 显存峰值 |
 | **量化** | FP16 / BF16 / INT8 / AWQ / GPTQ 横向对比 + 每 GiB 显存吞吐 |
 | **输出** | Markdown 报告 · 自包含 HTML 报告（内联 SVG，无 CDN）· Prometheus 指标 · Grafana 面板 |
-| **验证** | 302 个单元测试，约 13 秒跑完；无 GPU 亦可端到端验证 |
+| **实测** | 已在 RTX 4060 Laptop 8GB 完成**真机**压测：峰值 **30.8 tokens/s**，并发 2 即饱和 —— 见 [实测数据](#实测数据) |
+| **验证** | 313 个单元测试，约 10 秒跑完；无 GPU 亦可端到端验证 |
 | **落地** | Docker Compose 一键起监控栈；离线安装与隔离内网可用 |
 
 ### 它和「随手写个压测脚本」的区别
@@ -287,7 +288,7 @@ llm-inference-bench/
 │   ├── mock_engine.py        # OpenAI 兼容 mock 引擎（无 GPU 也能验证）
 │   └── gen_grafana_dashboard.py
 ├── deploy/                   # Dockerfile / docker-compose / Prometheus / Grafana
-├── tests/                    # 302 个单元测试
+├── tests/                    # 313 个单元测试
 └── data/results/             # 压测产物（JSON / CSV / 报告）
 ```
 
@@ -309,13 +310,69 @@ llm-inference-bench/
 
 ---
 
+## 实测数据
+
+> 下面这次运行是**真机真模型**，不是 mock：8 GiB 消费级显卡 + Ollama +
+> `qwen2.5:7b`（Q4_K_M）。原始产物**全部随仓库发布**，可直接核对，也可以自己复算：
+>
+> - [`report.md`](data/results/run-20261009-103334/report.md) —— 完整 7 章节报告（Gitee 可直接阅读）
+> - [`report.html`](data/results/run-20261009-103334/report.html) —— 自包含图表版（内联 SVG，无外部依赖）
+> - [`ollama__qwen2.5_7b__q4_k_m.json`](data/results/run-20261009-103334/ollama__qwen2.5_7b__q4_k_m.json) —— 原始结果，可喂给 `--report-only` 重新出报告
+>
+> ⓘ 这份 JSON 的内部字段 `result_stem` 仍是修复前的写法
+> （`ollama__qwen2.5:7b__q4_k_m`，**含冒号**），而实际文件名已由修复后的
+> `_safe_slug` 生成。这不是数据被改过 —— 它本身就是「冒号触发 NTFS 备用数据流」
+> 那个 bug 的现场记录，见 [`CHANGELOG.md`](CHANGELOG.md) 的 Fixed 段。
+
+**环境与参数**
+
+| 项 | 值 |
+| --- | --- |
+| GPU | NVIDIA GeForce RTX 4060 Laptop GPU，8.0 GiB |
+| 引擎 / 模型 | Ollama / `qwen2.5:7b`（Q4_K_M） |
+| 并发梯度 | 1 → 32（1, 2, 4, 8, 16, 32） |
+| 每请求生成 | 256 tokens，温度 0，流式，预热 2 次 |
+| 规模 | 63 个请求，**0 失败**，总耗时 222.94 s |
+
+**吞吐与延迟**
+
+| 并发 | 吞吐 tokens/s | 相对加速比 | TTFT 均值 | TPOT 均值 | 端到端 P99 |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 26.9 | 1.00× | 168.81 ms | 21.64 ms | 2159.52 ms |
+| 2 | 27.3 | 1.02× | 1335.32 ms | 23.93 ms | 4607.57 ms |
+| 4 | 30.4 | 1.13× | 3636.49 ms | 23.44 ms | 8871.39 ms |
+| **8** | **30.8（峰值）** | 1.14× | 7804.78 ms | 22.96 ms | 17178.87 ms |
+| 16 | 30.0 | 1.11× | 15979.12 ms | 21.56 ms | 32414.35 ms |
+| 32 | 29.3（反降） | 1.09× | **30839.10 ms** | 21.69 ms | **62798.84 ms** |
+
+显存峰值 **5.6 / 8.0 GiB（70.3%）**，全程 GPU 平均利用率 71.9%（305 个采样点）。
+
+**读出来的三条结论**
+
+1. **并发 2 就已饱和。** 从并发 1 到峰值吞吐只拿到 **1.14×** 加速比，之后继续
+   加压吞吐不升反降。8 GiB 卡跑 7B Q4_K_M 的容量上限很低 —— 按「并发 = 用户数」
+   去规划的话，第 3 个用户开始就已经在排队了。
+2. **饱和点之后加压只推高延迟。** 并发 1 → 32，TTFT 从 168.81 ms 恶化到
+   **30839.10 ms（182 倍）**，端到端 P99 从 2.2 s 涨到 62.8 s。
+   这就是「只看峰值吞吐会给出错误容量结论」的直接证据，也是本项目做并发梯度
+   扫描而不是单点压测的理由。
+3. **TPOT 几乎不随并发变化（21.6 ~ 23.9 ms）。** 单 token 解码速度很稳定，说明
+   瓶颈在请求排队与调度，而不是算力被压满。要提吞吐得从调度侧动手，不是换一个
+   更快的解码 kernel。
+
+> ⚠️ **别和 demo 混淆**：仓库自带的 [`data/results/demo/`](data/results/demo/) 用的是
+> 内置 **mock 引擎**（延迟是模拟出来的），只用于零 GPU 验证全链路，
+> **不能用来推断任何真实硬件性能**。上表是目前唯一一份真机数据。
+
+---
+
 ## 测试
 
 ```bash
 python -m pytest tests -q
 ```
 
-302 个测试，约 12 秒跑完，覆盖：
+313 个测试，约 10 秒跑完，覆盖：
 
 | 测试文件 | 用例数 | 重点 |
 | --- | --- | --- |
@@ -323,18 +380,19 @@ python -m pytest tests -q
 | `test_quant.py` | 46 | 基线识别、比值计算、结论措辞 |
 | `test_gpu_monitor.py` | 34 | 多卡时序求和峰值、nvidia-smi 缺失降级 |
 | `test_runner.py` | 21 | 并发扫描、预热剔除、失败率门禁 |
-| `test_store.py` | 29 | 落盘/回读一致性、文件名防碰撞 |
+| `test_store.py` | 40 | 落盘/回读一致性、文件名防碰撞（含 Windows 保留字符） |
 | `test_report.py` | 61 | Markdown/HTML 章节、SVG 无外部引用 |
 | `test_api.py` | 35 | 端点契约、异步任务生命周期 |
 | `test_config.py` | 33 | 环境变量覆盖、URL 归一化 |
 
-写测试的过程中发现并修掉了 5 个真实缺陷（详见 [`CHANGELOG.md`](CHANGELOG.md) 的 Fixed 段）：
+写测试与真机压测过程中发现并修掉了 6 个真实缺陷（详见 [`CHANGELOG.md`](CHANGELOG.md) 的 Fixed 段）：
 
 1. 多卡显存峰值取各卡最大值 → 改为按时间戳求和（8 卡场景原少报 8 倍）
 2. `prometheus_client` 的 `Info.info()` 逐字段调用会整体替换标签集 → 一次传完整字典
 3. 结果文件名只用引擎名，FP16 与 AWQ 互相覆盖 → 改为 `<引擎>__<模型>__<量化>`
 4. 全部请求失败的运行退出码仍为 0（CI 会误判通过）→ 改为返回 2 并打印失败详情
 5. 错误样本列表无上限 → 限制为 5 条，避免结果文件膨胀数十倍
+6. `_safe_slug` 放行 `:`，`qwen2.5:7b` 触发 NTFS 备用数据流 → 结果文件被写进数据流、目录里只剩 0 字节（真机跑 Ollama 时暴露）
 
 ---
 
@@ -361,7 +419,7 @@ python -m pytest tests -q
 ```bash
 # 快捷上手：不需要 GPU
 pip install -r requirements.txt -r requirements-dev.txt
-python -m pytest tests -q          # 302 passed in ~13s
+python -m pytest tests -q          # 313 passed in ~10s
 python scripts/mock_engine.py --port 8102 &
 ```
 
@@ -372,7 +430,8 @@ python scripts/mock_engine.py --port 8102 &
 
 ## 已知限制
 
-- **mock 引擎的延迟是模拟的**，只用于验证链路，不能用来推断真实硬件性能。
+- **mock 引擎的延迟是模拟的**，只用于验证链路，不能用来推断真实硬件性能
+  （仓库自带的 `data/results/demo/` 即属此类；真机数据见[实测数据](#实测数据)）。
 - 显存监控依赖 `nvidia-smi`，非 NVIDIA 平台会静默降级为「无显存数据」。
 - `/compare` 目前只能在**同一个 run 目录**内对比，跨 run 对比需先合并结果文件。
 - Prometheus 直方图是累计值，跨多次压测会持续累加，重启服务才归零。
