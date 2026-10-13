@@ -1,6 +1,6 @@
 我给 8 卡 72B 写了个开源压测工具：聊聊 LLM 推理压测里最容易写错的 5 件事
 
-项目地址：https://gitee.com/wang-guangshuooo/llm-inference-bench
+项目地址：https://github.com/yangchuan665/llm-inference-bench
 
 这是一个多引擎（vLLM / Ollama）、多量化等级（FP16 / INT8 / AWQ）的大模型推理压测与评测平台。313 个单元测试，无 GPU 也能跑通全链路。
 
@@ -235,7 +235,7 @@ AWQ           峰值吞吐 1874.1 tok/s   相对基线 0.981x
 
 项目地址
 
-https://gitee.com/wang-guangshuooo/llm-inference-bench
+https://github.com/yangchuan665/llm-inference-bench
 
 功能：
 

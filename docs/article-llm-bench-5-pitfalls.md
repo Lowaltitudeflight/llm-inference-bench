@@ -1,6 +1,6 @@
 # 我把 8 卡 72B 的压测经验写成了开源工具：聊聊 LLM 推理压测里最容易写错的 5 件事
 
-> 项目地址：https://gitee.com/wang-guangshuooo/llm-inference-bench
+> 项目地址：https://github.com/yangchuan665/llm-inference-bench
 >
 > 这是一个多引擎（vLLM / Ollama）、多量化等级（FP16 / INT8 / AWQ）的大模型推理压测与评测平台。
 > 313 个单元测试，无 GPU 也能跑通全链路。
@@ -283,7 +283,7 @@ size: 28165 bytes
 
 ## 项目地址
 
-**https://gitee.com/wang-guangshuooo/llm-inference-bench**
+**https://github.com/yangchuan665/llm-inference-bench**
 
 - 支持 vLLM / Ollama 及任意 OpenAI 兼容端点
 - 并发压测（吞吐 / TTFT / TPOT / P50-P95-P99）+ 显存曲线 + 量化横向评测
@@ -300,6 +300,6 @@ export VLLM_BASE_URL="http://127.0.0.1:8102" VLLM_MODEL="mock-72b"
 python scripts/run_bench.py --engine vllm --quant fp16 --levels 1,2,4,8,16,32
 ```
 
-文档里还有更详细的推导：[压测方法论](https://gitee.com/wang-guangshuooo/llm-inference-bench/blob/master/docs/methodology.md)。
+文档里还有更详细的推导：[压测方法论](https://github.com/yangchuan665/llm-inference-bench/blob/master/docs/methodology.md)。
 
 如果发现哪里算错了，欢迎提 Issue——**这类反馈比加功能更有价值。**

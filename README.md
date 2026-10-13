@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![Tests](https://img.shields.io/badge/tests-313%20passed-brightgreen.svg)](tests/)
-[![Version](https://img.shields.io/badge/release-v0.1.0-orange.svg)](https://gitee.com/wang-guangshuooo/llm-inference-bench/releases)
+[![Version](https://img.shields.io/badge/release-v0.1.0-orange.svg)](https://github.com/yangchuan665/llm-inference-bench/releases)
 
 一句话定位：**把「部署完大模型之后怎么证明它跑得好」这件事工程化。**
 
@@ -315,7 +315,7 @@ llm-inference-bench/
 > 下面这次运行是**真机真模型**，不是 mock：8 GiB 消费级显卡 + Ollama +
 > `qwen2.5:7b`（Q4_K_M）。原始产物**全部随仓库发布**，可直接核对，也可以自己复算：
 >
-> - [`report.md`](data/results/run-20261009-103334/report.md) —— 完整 7 章节报告（Gitee 可直接阅读）
+> - [`report.md`](data/results/run-20261009-103334/report.md) —— 完整 7 章节报告（GitHub 可直接阅读）
 > - [`report.html`](data/results/run-20261009-103334/report.html) —— 自包含图表版（内联 SVG，无外部依赖）
 > - [`ollama__qwen2.5_7b__q4_k_m.json`](data/results/run-20261009-103334/ollama__qwen2.5_7b__q4_k_m.json) —— 原始结果，可喂给 `--report-only` 重新出报告
 >
