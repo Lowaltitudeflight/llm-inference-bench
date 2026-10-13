@@ -1,71 +1,73 @@
 # llm-inference-bench
 
-**大模型推理压测与评测平台** —— 多引擎、多量化等级的推理性能横向评测工具。
+**LLM inference benchmarking and evaluation platform** — cross-engine, cross-quantisation performance comparison for self-hosted LLM serving.
 
+[![Stars](https://img.shields.io/github/stars/yangchuan665/llm-inference-bench?style=flat&color=yellow)](https://github.com/yangchuan665/llm-inference-bench/stargazers)
+[![Forks](https://img.shields.io/github/forks/yangchuan665/llm-inference-bench?style=flat&color=blue)](https://github.com/yangchuan665/llm-inference-bench/network/members)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![Tests](https://img.shields.io/badge/tests-313%20passed-brightgreen.svg)](tests/)
 [![Version](https://img.shields.io/badge/release-v0.1.0-orange.svg)](https://github.com/yangchuan665/llm-inference-bench/releases)
 
-一句话定位：**把「部署完大模型之后怎么证明它跑得好」这件事工程化。**
+**English** ｜ [简体中文](README.zh-CN.md)
 
-给定若干推理引擎（vLLM / Ollama）和若干量化配置（FP16 / INT8 / AWQ / GPTQ），
-自动做并发梯度压测，采集吞吐、首包延迟、尾延迟、显存占用，产出一份可直接交付客户的
-对比报告，并把指标实时暴露给 Prometheus / Grafana。
+**One line:** this project makes *"how do I prove the model actually performs well after deployment"* an engineering problem rather than an argument.
 
-> **开发时间**：2026.03 – 2026.06 完成主体开发；2026.09 完成开源整理（补充文档、容器化与 CI）。
-> 项目源于实习期间一次 8 卡部署 Qwen2.5-72B 的私有化交付，重点解决「压测口径不统一、结论无法复现」的问题，并沉淀了一套可复用的指标定义与评测方法。
+Given a set of inference engines (vLLM / Ollama) and a set of quantisation configurations (FP16 / INT8 / AWQ / GPTQ), it runs an automatic concurrency sweep, collects throughput, time-to-first-token, tail latency and VRAM usage, and produces a comparison report you can hand to a customer — while exposing the metrics live to Prometheus / Grafana.
 
-### 一屏看懂
+> **Timeline**: core development 2026.03 – 2026.06; open-source cleanup (docs, containerisation, CI) in 2026.09.
+> The project grew out of a real 8-GPU private deployment of Qwen2.5-72B during an internship, focused on eliminating inconsistent benchmark definitions and irreproducible conclusions, and produced a reusable set of metric definitions and evaluation methods.
+
+### At a glance
 
 ```bash
-# 无需 GPU 也能跑通全链路 —— 内置 OpenAI 兼容的 mock 引擎
+# Runs end to end without a GPU — a built-in OpenAI-compatible mock engine
 pip install -r requirements.txt
 python scripts/mock_engine.py --port 8102 &
 export NO_PROXY="127.0.0.1,localhost"
 export VLLM_BASE_URL="http://127.0.0.1:8102" VLLM_MODEL="mock-72b"
 python scripts/run_bench.py --engine vllm --quant fp16 --levels 1,2,4,8,16,32
-# → data/results/<run>/report.html  （自包含 HTML，隔离内网可直接打开）
+# → data/results/<run>/report.html  (self-contained HTML, opens directly on an isolated network)
 ```
 
 | | |
 | --- | --- |
-| **引擎** | vLLM、Ollama，以及任意 OpenAI 兼容端点 |
-| **指标** | 吞吐 tokens/s · TTFT 首包延迟 · TPOT · P50/P95/P99 尾延迟 · 显存峰值 |
-| **量化** | FP16 / BF16 / INT8 / AWQ / GPTQ 横向对比 + 每 GiB 显存吞吐 |
-| **输出** | Markdown 报告 · 自包含 HTML 报告（内联 SVG，无 CDN）· Prometheus 指标 · Grafana 面板 |
-| **实测** | 已在 RTX 4060 Laptop 8GB 完成**真机**压测：峰值 **30.8 tokens/s**，并发 2 即饱和 —— 见 [实测数据](#实测数据) |
-| **验证** | 313 个单元测试，约 7 秒跑完；无 GPU 亦可端到端验证 |
-| **落地** | Docker Compose 一键起监控栈；离线安装与隔离内网可用 |
+| **Engines** | vLLM, Ollama, and any OpenAI-compatible endpoint |
+| **Metrics** | throughput (tokens/s) · TTFT · TPOT · P50/P95/P99 tail latency · peak VRAM |
+| **Quantisation** | FP16 / BF16 / INT8 / AWQ / GPTQ comparison + throughput per GiB of VRAM |
+| **Output** | Markdown report · self-contained HTML report (inline SVG, no CDN) · Prometheus metrics · Grafana dashboard |
+| **Measured** | Benchmarked on **real hardware** (RTX 4060 Laptop, 8 GB): **30.8 tokens/s** peak, saturating at concurrency 2 — see [Measured results](#measured-results) |
+| **Verified** | 313 unit tests, ~7 s to run; full pipeline verifiable without a GPU |
+| **Deployable** | One-command Docker Compose monitoring stack; works offline and on isolated networks |
 
-### 它和「随手写个压测脚本」的区别
+### How it differs from "just writing a load-test script"
 
-- **TTFT 基于流式首个内容分片测量** —— 不是 HTTP 200 到达时刻，否则会漏掉排队与 prefill
-- **TPOT = 生成耗时 / (输出 token − 1)** —— 首个 token 已计入 TTFT，重复计算会低估解码速度
-- **多卡显存峰值按时序求和** —— 取各卡峰值的最大值，8 卡场景会少报 8 倍
-- **每个并发请求独立客户端** —— 复用连接池会把「并发」测成「排队」
-- **报告自包含** —— 客户内网常为物理隔离，带外部依赖的报告打开就是白屏
+- **TTFT is measured at the first streamed content chunk** — not when HTTP 200 arrives, which would hide queueing and prefill
+- **TPOT = generation time / (output tokens − 1)** — the first token is already counted in TTFT; counting it twice understates decode speed
+- **Multi-GPU peak VRAM is summed over time** — taking the max of per-GPU peaks under-reports by 8× on an 8-GPU box
+- **Each concurrent request gets its own client** — a shared connection pool turns "concurrency" into "queueing"
+- **Reports are self-contained** — customer networks are often physically isolated, and a report depending on external assets opens to a blank page
 
-> 这些口径踩过的坑都写在了 [压测方法论](docs/methodology.md) 里，附推导与常见坑点速查表。
+> The traps behind these definitions are documented in [Benchmarking Methodology](docs/methodology.md), with derivations and a quick-reference table of common pitfalls.
 
 ---
 
-## 为什么需要它
+## Why you need it
 
-私有化交付场景里，客户真正关心的不是「你部署起来了」，而是：
+In private deployments the customer does not really care that "you got it running". They care about:
 
-| 客户的疑问 | 本工具的答案 |
+| The customer's question | This tool's answer |
 | --- | --- |
-| 这套配置能扛多少并发？ | 并发梯度压测曲线：吞吐随并发增长直到饱和拐点 |
-| 用户体感快不快？ | TTFT（首包延迟）—— 流式场景下唯一有意义的体感指标 |
-| 延迟长尾会不会爆？ | P50 / P95 / P99 分位统计，只看均值会掩盖长尾 |
-| 显存够不够跑更大模型？ | 全阶段显存占用曲线 + 峰值（多卡按时序求和） |
-| 换量化能省多少显存、掉多少性能？ | FP16 / INT8 / AWQ 横向对比矩阵 + 换算每 GiB 显存吞吐 |
-| 部署完怎么持续看？ | Prometheus 指标 + 预置 Grafana 面板（15 个图） |
+| How much concurrency can this handle? | Concurrency sweep curve: throughput rises until the saturation knee |
+| Does it feel fast to users? | TTFT — the only meaningful perceived-latency metric for streaming |
+| Will tail latency blow up? | P50 / P95 / P99 percentiles; averages hide the tail |
+| Is there VRAM headroom for a bigger model? | Full-stage VRAM curve plus peak (summed across GPUs over time) |
+| How much VRAM does quantisation save, and what does it cost in speed? | FP16 / INT8 / AWQ comparison matrix plus throughput per GiB |
+| How do I keep watching it after go-live? | Prometheus metrics plus a pre-built Grafana dashboard (15 panels) |
 
 ---
 
-## 架构
+## Architecture
 
 ```
                           ┌──────────────────────────────┐
@@ -75,20 +77,22 @@ python scripts/run_bench.py --engine vllm --quant fp16 --levels 1,2,4,8,16,32
                                           │
                           ┌───────────────▼──────────────┐
                           │      bench/runner.py         │
-                          │  并发梯度扫描 · 预热剔除 ·    │
-                          │  每请求独立客户端 · 墙钟计时   │
+                          │  concurrency sweep · warmup  │
+                          │  pruning · per-request client│
+                          │  · wall-clock timing         │
                           └───┬───────────────────┬──────┘
                               │                   │
               ┌───────────────▼──────┐   ┌────────▼─────────────┐
               │  engines/client.py    │   │  monitor/gpu.py      │
               │  UnifiedLLMClient     │   │  GpuMonitor          │
-              │  · 流式 SSE 解析       │   │  · nvidia-smi 轮询    │
-              │  · TTFT=首个内容块     │   │  · 显存曲线/峰值      │
-              │  · 优先采信服务端 usage│   │  · 后台线程采样       │
+              │  · streaming SSE      │   │  · nvidia-smi poll   │
+              │  · TTFT = first chunk │   │  · VRAM curve/peak   │
+              │  · prefers server     │   │  · background thread │
+              │    usage fields       │   │                      │
               └───────────┬───────────┘   └────────┬─────────────┘
                           │                        │
         ┌─────────────────┴───────┐                │
-        │   OpenAI 兼容 HTTP API   │                │
+        │  OpenAI-compatible API  │                │
         │  ┌─────────┐ ┌────────┐ │                │
         │  │  vLLM   │ │ Ollama │ │                │
         │  └─────────┘ └────────┘ │                │
@@ -97,99 +101,88 @@ python scripts/run_bench.py --engine vllm --quant fp16 --levels 1,2,4,8,16,32
               ┌───────────▼────────────────────────▼─────────┐
               │           metrics/stats.py                   │
               │  RequestResult · StageMetrics                │
-              │  分位数(线性插值) · 错误分类 · 失败率门禁      │
+              │  percentiles (linear interpolation) ·        │
+              │  error classification · failure-rate gate    │
               └───┬──────────────┬──────────────┬────────────┘
                   │              │              │
       ┌───────────▼───┐  ┌───────▼──────┐  ┌────▼─────────────┐
       │ metrics/store │  │ monitor/quant│  │ metrics/prometheus│
-      │ JSON+CSV 落盘  │  │ 量化横向对比  │  │ 直方图/仪表/Info  │
-      │ 结果可复现     │  │ 基线自动识别  │  │ → /metrics        │
+      │ JSON+CSV      │  │ quantisation │  │ histograms/gauges │
+      │ reproducible  │  │ baseline ID  │  │ → /metrics        │
       └───────┬───────┘  └───────┬──────┘  └────┬─────────────┘
               │                  │              │
       ┌───────▼──────────────────▼──────┐  ┌────▼──────────────┐
       │        report/generator.py      │  │   Prometheus      │
       │  markdown.py  ·  html.py        │  │        ↓          │
-      │  svgchart.py（纯内联 SVG 图表）  │  │    Grafana        │
-      │  自包含 HTML，离线可用，无 CDN    │  │  15 面板预置仪表盘 │
+      │  svgchart.py (pure inline SVG)  │  │    Grafana        │
+      │  self-contained HTML, offline   │  │  15-panel board   │
       └─────────────────────────────────┘  └───────────────────┘
 ```
 
 ---
 
-## 核心设计决策
+## Core design decisions
 
-以下几点是这个工具区别于「随手写个脚本压一压」的地方。
+The following are what separates this tool from "a script someone wrote to hammer the endpoint".
 
-### 1. TTFT 必须在流式下测量
+### 1. TTFT must be measured on a streaming response
 
-非流式请求只能拿到总耗时，首包延迟无从得知。本工具强制走 `stream=true`，
-并把 TTFT 定义为**第一个携带内容的分片到达的时刻**（而非收到 HTTP 200 的时刻）。
-服务端提供的 `usage` 字段若存在则优先采信，否则按分片计数自行统计。
+A non-streaming request only yields a total duration, from which first-token latency cannot be recovered. This tool forces `stream=true` and defines TTFT as **the moment the first chunk carrying content arrives** (not the moment HTTP 200 is received). If the server provides a `usage` field it is preferred; otherwise token counts are derived from the chunk stream.
 
-`TPOT` 的算法是 `generation_time / (output_tokens - 1)` —— 减去 1 是因为
-首个 token 的等待时间已经计入 TTFT，重复计算会低估单 token 生成速度。
+`TPOT` is computed as `generation_time / (output_tokens - 1)` — the minus one exists because waiting for the first token is already counted in TTFT, and counting it twice understates per-token decode speed.
 
-### 2. 每个请求使用独立客户端
+### 2. Each request uses its own client
 
-压测时若所有并发请求复用同一个 HTTP 连接池，测出来的「并发」实际上是在
-连接池队列里排队。本工具为每个并发请求创建独立客户端，确保测量的是
-推理引擎的并发能力，而不是 HTTP 客户端的排队能力。
+If all concurrent requests share one HTTP connection pool, what you measure as "concurrency" is really queueing inside the pool. This tool creates an independent client per concurrent request, so the measurement reflects the engine's concurrency capability rather than the HTTP client's queueing behaviour.
 
-### 3. 显存峰值按时序求和，而非取单卡最大值
+### 3. Multi-GPU peak VRAM is summed over time, not maxed per GPU
 
-多卡场景下这是个容易写错的地方：8 张卡各用 60 GiB，真实占用是 480 GiB。
-如果代码写成「取各卡峰值的最大者」，结果会少报 8 倍。
+This is an easy mistake on multi-GPU hosts: 8 GPUs each using 60 GiB is 480 GiB in total. Code that takes "the maximum of the per-GPU peaks" under-reports by 8×.
 
-实现上按时间戳对齐后求和再取最大值（见 `monitor/gpu.py::GpuMonitor.curve`），
-并有专门的回归测试守着（`test_multi_gpu_peak_not_underreported`）。
+The implementation aligns samples by timestamp, sums, then takes the maximum (see `monitor/gpu.py::GpuMonitor.curve`), and a dedicated regression test guards it (`test_multi_gpu_peak_not_underreported`).
 
-### 4. 报告是自包含 HTML
+### 4. Reports are self-contained HTML
 
-内联 SVG 画图、无 CDN、无 `<script>`。原因很实际：客户内网多为隔离环境，
-一个依赖外部资源的报告打开就是白屏。
+Charts are inline SVG — no CDN, no `<script>`. The reason is practical: customer networks are often isolated, and a report that depends on external resources opens to a blank page.
 
-### 5. 量化对比自动识别基线
+### 5. Quantisation comparison identifies the baseline automatically
 
-`BASELINE_QUANTS = {fp16, bf16, float16, bfloat16, none, unknown}` 中出现即视为基线。
-对比结论只陈述事实（"awq 峰值 1874.1 tokens/s，比最优低 2.0%"），
-不编造胜负 —— 在 mock 环境里 awq 本来就该略慢于 fp16。
+Anything in `BASELINE_QUANTS = {fp16, bf16, float16, bfloat16, none, unknown}` is treated as the baseline. Conclusions state facts only ("awq peaks at 1874.1 tokens/s, 2.0% below the best") and do not invent a winner — in a mock environment `awq` genuinely should be slightly slower than `fp16`.
 
 ---
 
-## 快速开始
+## Quick start
 
-### 环境准备
+### Setup
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
-pip install -r requirements.txt     # 运行依赖
-pip install -r requirements-dev.txt # 开发/测试依赖
+source .venv/bin/activate           # Windows: .venv\Scripts\activate
+pip install -r requirements.txt      # runtime dependencies
+pip install -r requirements-dev.txt  # dev/test dependencies
 ```
 
-### 一分钟跑通（不需要 GPU 和真实模型）
+### Full pipeline in one minute (no GPU, no real model)
 
-内置了一个 OpenAI 兼容的 **mock 引擎**，带真实感的排队延迟模拟，
-用于在无 GPU 环境下验证整条链路。
+A built-in OpenAI-compatible **mock engine** with realistic queueing-delay simulation lets you verify the whole pipeline without a GPU.
 
 ```bash
-# 终端 1：启动 mock 引擎（监听 8102）
+# Terminal 1: start the mock engine (listening on 8102)
 python scripts/mock_engine.py --port 8102
 
-# 终端 2：先把 base_url 指向 mock，再跑压测
+# Terminal 2: point base_url at the mock, then benchmark
 export NO_PROXY="127.0.0.1,localhost" no_proxy="127.0.0.1,localhost"
 export VLLM_BASE_URL="http://127.0.0.1:8102" VLLM_MODEL="mock-72b"
 python scripts/run_bench.py --engine vllm --quant fp16 \
     --levels 1,2,4,8,16,32 --max-tokens 256 --output-dir data/results/demo
 ```
 
-> Windows Git Bash 下必须设置 `NO_PROXY`，否则本地请求可能被系统代理劫持，
-> 表现为 `502 upstream connect failed`。
+> On Windows Git Bash you must set `NO_PROXY`, or local requests may be hijacked by a system proxy and fail with `502 upstream connect failed`.
 
-### 打真机
+### Benchmarking real hardware
 
 ```bash
-# 真实 vLLM
+# Real vLLM
 python scripts/run_bench.py \
     --base-url http://127.0.0.1:8000/v1 \
     --model Qwen2.5-72B-Instruct \
@@ -198,252 +191,261 @@ python scripts/run_bench.py \
     --max-tokens 512 \
     --output-dir data/results/qwen72b
 
-# 真实 Ollama（量化等级写模型名里）
+# Real Ollama (quantisation level is part of the model name)
 python scripts/run_bench.py \
     --engine ollama --base-url http://127.0.0.1:11434 \
     --model qwen2.5:7b --quant q4_K_M
 ```
 
-### 量化横向对比
+### Quantisation comparison
 
 ```bash
-# 用同一批并发档位分别跑 FP16 / AWQ，产物落在同一 run 目录下
+# Run FP16 and AWQ over the same concurrency levels into one run directory
 python scripts/run_bench.py --run-id quant-72b --output-dir data/results \
     --base-url http://127.0.0.1:8000/v1 --model Qwen2.5-72B-Instruct --quant fp16
 python scripts/run_bench.py --run-id quant-72b --output-dir data/results \
     --base-url http://127.0.0.1:8000/v1 --model Qwen2.5-72B-AWQ --quant awq
 
-# 报告里会自动生成量化对比章节
+# A quantisation comparison section is generated automatically
 ```
 
-### 从已有结果重新出报告
+### Re-generating a report from existing results
 
 ```bash
 python scripts/run_bench.py --report-only --from-results data/results/demo
 ```
 
-### 服务化
+### Serving mode
 
 ```bash
 python scripts/serve.py --host 0.0.0.0 --port 8090
 ```
 
-因为一次完整扫描要跑几分钟，接口设计成**异步任务模型**：
+Because a full sweep takes several minutes, the API is designed around an **asynchronous job model**:
 
-| 方法 | 路径 | 说明 |
+| Method | Path | Description |
 | --- | --- | --- |
-| GET | `/` | 服务信息与端点清单 |
-| GET | `/health` | 存活探针 |
-| GET | `/engines` | 列出已配置引擎 |
-| POST | `/engines/check` | 探测引擎可达性与模型是否已加载 |
-| POST | `/bench` | 提交压测任务，**立即返回 job_id** |
-| GET | `/jobs` | 任务列表 |
-| GET | `/jobs/{id}` | 轮询进度（`progress` 0→1） |
-| GET | `/jobs/{id}/result` | 取结果 JSON |
-| GET | `/jobs/{id}/report` | 取 HTML 报告 |
-| DELETE | `/jobs/{id}` | 删除任务记录 |
-| GET | `/reports` | 列出历史报告 |
-| GET | `/reports/{run_id}/{filename}` | 按 run 取报告文件 |
-| POST | `/compare` | 对同一 run 下多份结果做量化对比 |
-| GET | `/metrics` | Prometheus 抓取端点 |
-| GET | `/metrics/snapshot` | 指标快照（JSON，用于调试） |
+| GET | `/` | Service info and endpoint list |
+| GET | `/health` | Liveness probe |
+| GET | `/engines` | List configured engines |
+| POST | `/engines/check` | Probe engine reachability and whether the model is loaded |
+| POST | `/bench` | Submit a benchmark job, **returns `job_id` immediately** |
+| GET | `/jobs` | Job list |
+| GET | `/jobs/{id}` | Poll progress (`progress` 0→1) |
+| GET | `/jobs/{id}/result` | Fetch result JSON |
+| GET | `/jobs/{id}/report` | Fetch the HTML report |
+| DELETE | `/jobs/{id}` | Delete a job record |
+| GET | `/reports` | List historical reports |
+| GET | `/reports/{run_id}/{filename}` | Fetch a report file by run |
+| POST | `/compare` | Compare multiple results within one run |
+| GET | `/metrics` | Prometheus scrape endpoint |
+| GET | `/metrics/snapshot` | Metric snapshot (JSON, for debugging) |
 
-### 监控栈
+> ⚠️ **Before exposing this service beyond localhost:** the endpoints ship without authentication, and `base_url` in a `/bench` request body is caller-controlled — that is an SSRF primitive against your internal network. Put it behind an authenticating gateway and restrict permitted target hosts.
+
+### Monitoring stack
 
 ```bash
 cd deploy && docker compose up -d
 # Prometheus  → http://localhost:9090
-# Grafana     → http://localhost:3000  (admin/admin，匿名只读)
+# Grafana     → http://localhost:3000  (admin/admin; anonymous read-only)
 ```
 
-Grafana 数据源与仪表盘由 provisioning 自动装载，仪表盘 JSON 由
-`scripts/gen_grafana_dashboard.py` 生成（15 面板，含引擎模板变量）。
+The Grafana data source and dashboard are provisioned automatically; the dashboard JSON is generated by `scripts/gen_grafana_dashboard.py` (15 panels, including engine template variables).
 
 ---
 
-## 项目结构
+## Project structure
 
 ```
 llm-inference-bench/
 ├── config/settings.py        # EngineTarget / BenchConfig / MonitorConfig
-├── engines/client.py         # 统一 OpenAI 兼容客户端（流式 TTFT 采集）
-├── bench/runner.py           # 并发梯度扫描、预热剔除、显存窗口对齐
+├── engines/client.py         # Unified OpenAI-compatible client (streaming TTFT capture)
+├── bench/runner.py           # Concurrency sweep, warmup pruning, VRAM window alignment
 ├── metrics/
-│   ├── stats.py              # RequestResult / StageMetrics / 分位数 / 错误分类
-│   ├── store.py              # JSON+CSV 落盘、结果反序列化、文件命名防碰撞
-│   └── prometheus.py         # 直方图/仪表/Info，定制 LLM 延迟桶
+│   ├── stats.py              # RequestResult / StageMetrics / percentiles / error classification
+│   ├── store.py              # JSON+CSV persistence, deserialisation, collision-safe filenames
+│   └── prometheus.py         # Histograms/gauges/info, custom LLM latency buckets
 ├── monitor/
-│   ├── gpu.py                # nvidia-smi 轮询、显存曲线（时序求和峰值）
-│   └── quant.py              # 量化分组、基线识别、对比矩阵、结论生成
+│   ├── gpu.py                # nvidia-smi polling, VRAM curve (time-summed peak)
+│   └── quant.py              # Quantisation grouping, baseline detection, comparison matrix
 ├── report/
-│   ├── generator.py          # 报告编排入口
-│   ├── markdown.py           # 7 章节 Markdown 报告
-│   ├── html.py               # 自包含 HTML 报告
-│   ├── svgchart.py           # 纯内联 SVG 折线图/柱状图（含对数轴）
-│   └── fmt.py                # 自适应单位格式化
-├── api/server.py             # FastAPI 服务（异步任务模型）
+│   ├── generator.py          # Report orchestration entry point
+│   ├── markdown.py           # 7-section Markdown report
+│   ├── html.py               # Self-contained HTML report
+│   ├── svgchart.py           # Pure inline SVG line/bar charts (incl. log axes)
+│   └── fmt.py                # Adaptive unit formatting
+├── api/server.py             # FastAPI service (async job model)
 ├── scripts/
-│   ├── run_bench.py          # CLI 入口
-│   ├── serve.py              # 服务启动器
-│   ├── mock_engine.py        # OpenAI 兼容 mock 引擎（无 GPU 也能验证）
+│   ├── run_bench.py          # CLI entry point
+│   ├── serve.py              # Service launcher
+│   ├── mock_engine.py        # OpenAI-compatible mock engine (verify without a GPU)
 │   └── gen_grafana_dashboard.py
 ├── deploy/                   # Dockerfile / docker-compose / Prometheus / Grafana
-├── tests/                    # 313 个单元测试
-└── data/results/             # 压测产物（JSON / CSV / 报告）
+├── tests/                    # 313 unit tests
+└── data/results/             # Benchmark artefacts (JSON / CSV / reports)
 ```
 
 ---
 
-## 报告示例
+## Report format
 
-报告分 7 个章节：
+The report has 7 sections:
 
-1. **概览** —— 被测配置、并发档位、结论速览
-2. **测试环境** —— Python / 平台 / GPU 型号驱动、被测模型与量化等级
-3. **吞吐能力** —— 各并发档位 tokens/s，含吞吐-并发曲线
-4. **延迟特性** —— TTFT / TPOT / P50 / P95 / P99 表格，含延迟-并发曲线
-5. **显存占用** —— 全阶段显存曲线与峰值，按并发档位拆表
-6. **量化横向对比** —— 基线识别、吞吐相对比、每 GiB 显存吞吐
-7. **结论与建议** —— 饱和拐点、稳定性提示、选型建议
+1. **Overview** — configuration under test, concurrency levels, headline conclusions
+2. **Test environment** — Python / platform / GPU model and driver, model and quantisation under test
+3. **Throughput** — tokens/s per concurrency level, with a throughput-vs-concurrency curve
+4. **Latency** — TTFT / TPOT / P50 / P95 / P99 tables, with a latency-vs-concurrency curve
+5. **VRAM usage** — full-stage VRAM curve and peak, broken down per concurrency level
+6. **Quantisation comparison** — baseline detection, relative throughput, throughput per GiB
+7. **Conclusions and recommendations** — saturation knee, stability warnings, selection advice
 
-产物同时输出 `report.md` 与 `report.html`。
+Both `report.md` and `report.html` are produced.
 
 ---
 
-## 实测数据
+## Measured results
 
-> 下面这次运行是**真机真模型**，不是 mock：8 GiB 消费级显卡 + Ollama +
-> `qwen2.5:7b`（Q4_K_M）。原始产物**全部随仓库发布**，可直接核对，也可以自己复算：
+> The run below used **real hardware and a real model**, not the mock: an 8 GiB consumer GPU running
+> Ollama with `qwen2.5:7b` (Q4_K_M). The raw artefacts are **published in this repository** so you can
+> verify them, or recompute the report yourself:
 >
-> - [`report.md`](data/results/run-20261009-103334/report.md) —— 完整 7 章节报告（GitHub 可直接阅读）
-> - [`report.html`](data/results/run-20261009-103334/report.html) —— 自包含图表版（内联 SVG，无外部依赖）
-> - [`ollama__qwen2.5_7b__q4_k_m.json`](data/results/run-20261009-103334/ollama__qwen2.5_7b__q4_k_m.json) —— 原始结果，可喂给 `--report-only` 重新出报告
+> - [`report.md`](data/results/run-20261009-103334/report.md) — full 7-section report (readable on GitHub)
+> - [`report.html`](data/results/run-20261009-103334/report.html) — self-contained chart version (inline SVG, no external assets)
+> - [`ollama__qwen2.5_7b__q4_k_m.json`](data/results/run-20261009-103334/ollama__qwen2.5_7b__q4_k_m.json) — raw results, feed it to `--report-only` to regenerate
 >
-> ⓘ 这份 JSON 的内部字段 `result_stem` 仍是修复前的写法
-> （`ollama__qwen2.5:7b__q4_k_m`，**含冒号**），而实际文件名已由修复后的
-> `_safe_slug` 生成。这不是数据被改过 —— 它本身就是「冒号触发 NTFS 备用数据流」
-> 那个 bug 的现场记录，见 [`CHANGELOG.md`](CHANGELOG.md) 的 Fixed 段。
+> ⓘ The `result_stem` field inside that JSON still uses the pre-fix format
+> (`ollama__qwen2.5:7b__q4_k_m`, **with a colon**), while the actual filename was produced by the
+> fixed `_safe_slug`. This is not edited data — it is the scene of the "colon triggers an NTFS
+> alternate data stream" bug. See the Fixed section of [`CHANGELOG.md`](CHANGELOG.md).
 
-![RTX 4060 Laptop 真机压测：吞吐在并发 8 饱和，首包延迟持续恶化](docs/images/real-gpu-benchmark-charts.png)
+![Real RTX 4060 Laptop benchmark: throughput saturates at concurrency 8 while time-to-first-token keeps degrading](docs/images/real-gpu-benchmark-charts.png)
 
-> 一眼看懂：**吞吐到并发 8 就压平了（30.8 tokens/s），首包延迟却从 169 ms 一路涨到 30.8 s。**
+> Read it in one glance: **throughput flattens at concurrency 8 (30.8 tokens/s), while TTFT climbs from 169 ms to 30.8 s.**
 
-**环境与参数**
+**Environment and parameters**
 
-| 项 | 值 |
+| Item | Value |
 | --- | --- |
-| GPU | NVIDIA GeForce RTX 4060 Laptop GPU，8.0 GiB |
-| 引擎 / 模型 | Ollama / `qwen2.5:7b`（Q4_K_M） |
-| 并发梯度 | 1 → 32（1, 2, 4, 8, 16, 32） |
-| 每请求生成 | 256 tokens，温度 0，流式，预热 2 次 |
-| 规模 | 63 个请求，**0 失败**，总耗时 222.94 s |
+| GPU | NVIDIA GeForce RTX 4060 Laptop GPU, 8.0 GiB |
+| Engine / model | Ollama / `qwen2.5:7b` (Q4_K_M) |
+| Concurrency levels | 1 → 32 (1, 2, 4, 8, 16, 32) |
+| Per-request generation | 256 tokens, temperature 0, streaming, 2 warmup runs |
+| Scale | 63 requests, **0 failures**, 222.94 s total |
 
-**吞吐与延迟**
+**Throughput and latency**
 
-| 并发 | 吞吐 tokens/s | 相对加速比 | TTFT 均值 | TPOT 均值 | 端到端 P99 |
+| Concurrency | Throughput (tokens/s) | Speedup | Mean TTFT | Mean TPOT | End-to-end P99 |
 | ---: | ---: | ---: | ---: | ---: | ---: |
 | 1 | 26.9 | 1.00× | 168.81 ms | 21.64 ms | 2159.52 ms |
 | 2 | 27.3 | 1.02× | 1335.32 ms | 23.93 ms | 4607.57 ms |
 | 4 | 30.4 | 1.13× | 3636.49 ms | 23.44 ms | 8871.39 ms |
-| **8** | **30.8（峰值）** | 1.14× | 7804.78 ms | 22.96 ms | 17178.87 ms |
+| **8** | **30.8 (peak)** | 1.14× | 7804.78 ms | 22.96 ms | 17178.87 ms |
 | 16 | 30.0 | 1.11× | 15979.12 ms | 21.56 ms | 32414.35 ms |
-| 32 | 29.3（反降） | 1.09× | **30839.10 ms** | 21.69 ms | **62798.84 ms** |
+| 32 | 29.3 (declining) | 1.09× | **30839.10 ms** | 21.69 ms | **62798.84 ms** |
 
-显存峰值 **5.6 / 8.0 GiB（70.3%）**，全程 GPU 平均利用率 71.9%（305 个采样点）。
+Peak VRAM **5.6 / 8.0 GiB (70.3%)**; average GPU utilisation 71.9% across the run (305 samples).
 
-**读出来的三条结论**
+**Three conclusions**
 
-1. **并发 2 就已饱和。** 从并发 1 到峰值吞吐只拿到 **1.14×** 加速比，之后继续
-   加压吞吐不升反降。8 GiB 卡跑 7B Q4_K_M 的容量上限很低 —— 按「并发 = 用户数」
-   去规划的话，第 3 个用户开始就已经在排队了。
-2. **饱和点之后加压只推高延迟。** 并发 1 → 32，TTFT 从 168.81 ms 恶化到
-   **30839.10 ms（182 倍）**，端到端 P99 从 2.2 s 涨到 62.8 s。
-   这就是「只看峰值吞吐会给出错误容量结论」的直接证据，也是本项目做并发梯度
-   扫描而不是单点压测的理由。
-3. **TPOT 几乎不随并发变化（21.6 ~ 23.9 ms）。** 单 token 解码速度很稳定，说明
-   瓶颈在请求排队与调度，而不是算力被压满。要提吞吐得从调度侧动手，不是换一个
-   更快的解码 kernel。
+1. **It saturates at concurrency 2.** Going from concurrency 1 to peak throughput buys only a
+   **1.14×** speedup, after which adding load reduces throughput. The capacity ceiling of a 7B
+   Q4_K_M model on an 8 GiB card is very low — if you plan capacity as "concurrency = number of
+   users", the third user is already queuing.
+2. **Past the saturation point, more load only adds latency.** From concurrency 1 to 32, TTFT
+   degrades from 168.81 ms to **30839.10 ms (182×)**, and end-to-end P99 rises from 2.2 s to
+   62.8 s. This is direct evidence that "reporting only peak throughput yields the wrong capacity
+   conclusion", and the reason this project sweeps concurrency instead of measuring a single point.
+3. **TPOT barely moves with concurrency (21.6 – 23.9 ms).** Per-token decode speed is stable,
+   which means the bottleneck is request queueing and scheduling, not saturated compute. To
+   raise throughput you have to work on scheduling, not swap in a faster decode kernel.
 
-> ⚠️ **别和 demo 混淆**：仓库自带的 [`data/results/demo/`](data/results/demo/) 用的是
-> 内置 **mock 引擎**（延迟是模拟出来的），只用于零 GPU 验证全链路，
-> **不能用来推断任何真实硬件性能**。上表是目前唯一一份真机数据。
+> ⚠️ **Do not confuse this with the demo:** the bundled [`data/results/demo/`](data/results/demo/)
+> uses the built-in **mock engine** (latency is simulated) and exists only to verify the pipeline
+> with no GPU. It **cannot be used to infer any real hardware performance**. The table above is
+> currently the only real-hardware dataset in the repository.
 
 ---
 
-## 测试
+## Tests
 
 ```bash
 python -m pytest tests -q
 ```
 
-313 个测试，约 7 秒跑完，覆盖：
+313 tests, ~7 seconds, covering:
 
-| 测试文件 | 用例数 | 重点 |
+| Test file | Cases | Focus |
 | --- | --- | --- |
-| `test_stats.py` | 43 | 分位数插值、TPOT 边界（单 token）、错误分类 |
-| `test_quant.py` | 46 | 基线识别、比值计算、结论措辞 |
-| `test_gpu_monitor.py` | 34 | 多卡时序求和峰值、nvidia-smi 缺失降级 |
-| `test_runner.py` | 21 | 并发扫描、预热剔除、失败率门禁 |
-| `test_store.py` | 40 | 落盘/回读一致性、文件名防碰撞（含 Windows 保留字符） |
-| `test_report.py` | 61 | Markdown/HTML 章节、SVG 无外部引用 |
-| `test_api.py` | 35 | 端点契约、异步任务生命周期 |
-| `test_config.py` | 33 | 环境变量覆盖、URL 归一化 |
+| `test_stats.py` | 43 | Percentile interpolation, TPOT boundary (single token), error classification |
+| `test_quant.py` | 46 | Baseline detection, ratio computation, conclusion wording |
+| `test_gpu_monitor.py` | 34 | Multi-GPU time-summed peak, graceful degradation without nvidia-smi |
+| `test_runner.py` | 21 | Concurrency sweep, warmup pruning, failure-rate gate |
+| `test_store.py` | 40 | Write/read-back consistency, filename collision safety (incl. Windows reserved characters) |
+| `test_report.py` | 61 | Markdown/HTML sections, SVG with no external references |
+| `test_api.py` | 35 | Endpoint contracts, async job lifecycle |
+| `test_config.py` | 33 | Environment variable overrides, URL normalisation |
 
-写测试与真机压测过程中发现并修掉了 6 个真实缺陷（详见 [`CHANGELOG.md`](CHANGELOG.md) 的 Fixed 段）：
+Writing the tests and running the real-hardware benchmark surfaced and fixed 6 genuine defects
+(see the Fixed section of [`CHANGELOG.md`](CHANGELOG.md)):
 
-1. 多卡显存峰值取各卡最大值 → 改为按时间戳求和（8 卡场景原少报 8 倍）
-2. `prometheus_client` 的 `Info.info()` 逐字段调用会整体替换标签集 → 一次传完整字典
-3. 结果文件名只用引擎名，FP16 与 AWQ 互相覆盖 → 改为 `<引擎>__<模型>__<量化>`
-4. 全部请求失败的运行退出码仍为 0（CI 会误判通过）→ 改为返回 2 并打印失败详情
-5. 错误样本列表无上限 → 限制为 5 条，避免结果文件膨胀数十倍
-6. `_safe_slug` 放行 `:`，`qwen2.5:7b` 触发 NTFS 备用数据流 → 结果文件被写进数据流、目录里只剩 0 字节（真机跑 Ollama 时暴露）
+1. Multi-GPU peak VRAM took the per-GPU maximum → now summed over timestamps (was under-reporting 8× on 8 GPUs)
+2. `prometheus_client`'s `Info.info()` replaces the whole label set when called per field → now passes one complete dict
+3. Result filenames used only the engine name, so FP16 and AWQ overwrote each other → now `<engine>__<model>__<quant>`
+4. A run where every request failed still exited 0 (CI would pass incorrectly) → now returns 2 and prints failure details
+5. The error sample list had no cap → limited to 5 entries, preventing results files from ballooning
+6. `_safe_slug` allowed `:`, so `qwen2.5:7b` triggered an NTFS alternate data stream → the result file was written into the ADS and only a 0-byte file remained in the directory (found while running Ollama on real hardware)
 
 ---
 
-## 与相近工具的关系
+## Relationship to similar tools
 
-不是要替代它们，定位不同：
+This is not intended to replace them; the positioning differs:
 
-| 工具 | 定位 | 本项目的差异 |
+| Tool | Positioning | How this project differs |
 | --- | --- | --- |
-| `vllm bench` / `vllm benchmark_serving` | vLLM 官方压测脚本 | 只覆盖 vLLM；本项目支持多引擎横向对比，且产出可直接交付的对比报告 |
-| `locust` / `wrk` / `ab` | 通用 HTTP 压测 | 不识别 LLM 语义，拿不到 TTFT / TPOT / token 吞吐，也无法对齐显存曲线 |
-| `genai-perf`（NVIDIA） | LLM 推理性能剖析 | 更侧重单模型深度剖析；本项目侧重**多配置横向对比 + 量化选型决策** |
-| `evalscope`（阿里） | 模型能力评测 | 评的是「模型答得好不好」，本项目评的是「推理跑得快不快」——两者互补 |
+| `vllm bench` / `vllm benchmark_serving` | Official vLLM benchmark scripts | vLLM only; this project compares multiple engines and produces a customer-ready report |
+| `locust` / `wrk` / `ab` | General HTTP load testing | No LLM awareness: no TTFT / TPOT / token throughput, and no way to align VRAM curves |
+| `genai-perf` (NVIDIA) | LLM inference profiling | More focused on deep single-model profiling; this project focuses on **multi-config comparison and quantisation decisions** |
+| `evalscope` (Alibaba) | Model capability evaluation | Evaluates *how well the model answers*; this evaluates *how fast inference runs* — complementary |
 
-本项目特别关注的场景是**私有化交付**：给定几套引擎 + 量化组合，得出「该给客户上哪一套」的结论，并留下一份能放进验收报告的材料。
+The scenario this project is built for is **private deployment delivery**: given several engine and
+quantisation combinations, produce the conclusion "which one should the customer run", plus the
+material to put in the acceptance report.
 
 ---
 
-## 参与贡献
+## Contributing
 
-欢迎提 Issue 和 PR。开始之前请先读 [`CONTRIBUTING.md`](CONTRIBUTING.md)，
-里面列了 5 条**不能想当然的指标口径**——改动指标相关逻辑前必看，否则很容易改错。
+Issues and pull requests are welcome. Before you start, read [`CONTRIBUTING.md`](CONTRIBUTING.md) —
+it lists 5 **metric definitions you should not assume away**, and you need to read them before
+touching any metric-related logic, or you will very likely get it wrong.
 
 ```bash
-# 快捷上手：不需要 GPU
+# Quick start, no GPU required
 pip install -r requirements.txt -r requirements-dev.txt
 python -m pytest tests -q          # 313 passed in ~7s
 python scripts/mock_engine.py --port 8102 &
 ```
 
-只要发现指标口径有问题、报告有误导性表述，或者在你的硬件上跑出了反直觉的结果，
-都欢迎开 Issue 讨论——**这类反馈比加功能更有价值**。
+If you find a metric definition that is wrong, a misleading statement in a report, or a
+counter-intuitive result on your own hardware, please open an issue — **this kind of feedback is
+more valuable than a new feature.**
 
 ---
 
-## 已知限制
+## Known limitations
 
-- **mock 引擎的延迟是模拟的**，只用于验证链路，不能用来推断真实硬件性能
-  （仓库自带的 `data/results/demo/` 即属此类；真机数据见[实测数据](#实测数据)）。
-- 显存监控依赖 `nvidia-smi`，非 NVIDIA 平台会静默降级为「无显存数据」。
-- `/compare` 目前只能在**同一个 run 目录**内对比，跨 run 对比需先合并结果文件。
-- Prometheus 直方图是累计值，跨多次压测会持续累加，重启服务才归零。
-- 未实现多机分布式压测；单进程压测在极高并发（>256）下可能受 GIL 限制。
+- **The mock engine simulates latency** and exists only to verify the pipeline; it cannot be used
+  to infer real hardware performance (the bundled `data/results/demo/` is such a case; real data is
+  in [Measured results](#measured-results)).
+- VRAM monitoring depends on `nvidia-smi`; on non-NVIDIA platforms it silently degrades to "no VRAM data".
+- `/compare` currently only compares results **within a single run directory**; cross-run comparison requires merging result files first.
+- Prometheus histograms are cumulative and keep accumulating across benchmark runs; only a service restart resets them.
+- Multi-machine distributed load generation is not implemented; single-process benchmarking may be GIL-limited at very high concurrency (>256).
 
 ---
 
 ## License
 
-MIT，见 [`LICENSE`](LICENSE)。
-
+MIT, see [`LICENSE`](LICENSE).
