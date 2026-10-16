@@ -2,12 +2,12 @@
 
 **LLM inference benchmarking and evaluation platform** — cross-engine, cross-quantisation performance comparison for self-hosted LLM serving.
 
-[![Stars](https://img.shields.io/github/stars/yangchuan665/llm-inference-bench?style=flat&color=yellow)](https://github.com/yangchuan665/llm-inference-bench/stargazers)
-[![Forks](https://img.shields.io/github/forks/yangchuan665/llm-inference-bench?style=flat&color=blue)](https://github.com/yangchuan665/llm-inference-bench/network/members)
+[![Stars](https://img.shields.io/github/stars/Lowaltitudeflight/llm-inference-bench?style=flat&color=yellow)](https://github.com/Lowaltitudeflight/llm-inference-bench/stargazers)
+[![Forks](https://img.shields.io/github/forks/Lowaltitudeflight/llm-inference-bench?style=flat&color=blue)](https://github.com/Lowaltitudeflight/llm-inference-bench/network/members)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![Tests](https://img.shields.io/badge/tests-313%20passed-brightgreen.svg)](tests/)
-[![Version](https://img.shields.io/badge/release-v0.1.0-orange.svg)](https://github.com/yangchuan665/llm-inference-bench/releases)
+[![Version](https://img.shields.io/badge/release-v0.1.0-orange.svg)](https://github.com/Lowaltitudeflight/llm-inference-bench/releases)
 
 **English** ｜ [简体中文](README.zh-CN.md)
 

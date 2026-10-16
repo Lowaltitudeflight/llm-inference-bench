@@ -1,6 +1,6 @@
 # LLM 推理压测里最容易写错的 5 件事（附开源工具）
 
-> **项目地址**：https://github.com/yangchuan665/llm-inference-bench
+> **项目地址**：https://github.com/Lowaltitudeflight/llm-inference-bench
 >
 > 多引擎（vLLM / Ollama）、多量化等级（FP16 / INT8 / AWQ）的大模型推理压测与评测平台。
 > 313 个单元测试，无 GPU 也能跑通全链路。
@@ -287,7 +287,7 @@ script 标签: 0
 
 ## 项目地址
 
-**https://github.com/yangchuan665/llm-inference-bench**
+**https://github.com/Lowaltitudeflight/llm-inference-bench**
 
 功能：
 

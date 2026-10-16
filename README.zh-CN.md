@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![Tests](https://img.shields.io/badge/tests-313%20passed-brightgreen.svg)](tests/)
-[![Version](https://img.shields.io/badge/release-v0.1.0-orange.svg)](https://github.com/yangchuan665/llm-inference-bench/releases)
+[![Version](https://img.shields.io/badge/release-v0.1.0-orange.svg)](https://github.com/Lowaltitudeflight/llm-inference-bench/releases)
 
 一句话定位：**把「部署完大模型之后怎么证明它跑得好」这件事工程化。**
 
