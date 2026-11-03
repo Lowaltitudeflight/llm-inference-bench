@@ -6,7 +6,7 @@
 [![Forks](https://img.shields.io/github/forks/Lowaltitudeflight/llm-inference-bench?style=flat&color=blue)](https://github.com/Lowaltitudeflight/llm-inference-bench/network/members)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/tests-313%20passed-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-326%20passed-brightgreen.svg)](tests/)
 [![Version](https://img.shields.io/badge/release-v0.1.0-orange.svg)](https://github.com/Lowaltitudeflight/llm-inference-bench/releases)
 
 **English** ｜ [简体中文](README.zh-CN.md)
@@ -26,8 +26,9 @@ pip install -r requirements.txt
 python scripts/mock_engine.py --port 8102 &
 export NO_PROXY="127.0.0.1,localhost"
 export VLLM_BASE_URL="http://127.0.0.1:8102" VLLM_MODEL="mock-72b"
-python scripts/run_bench.py --engine vllm --quant fp16 --levels 1,2,4,8,16,32
+python scripts/run_bench.py --engine vllm --quant fp16 --levels 1,2,4,8,16,32 --report
 # → data/results/<run>/report.html  (self-contained HTML, opens directly on an isolated network)
+# --report is what writes it: the sweep alone only leaves JSON/CSV behind.
 ```
 
 | | |
@@ -36,8 +37,8 @@ python scripts/run_bench.py --engine vllm --quant fp16 --levels 1,2,4,8,16,32
 | **Metrics** | throughput (tokens/s) · TTFT · TPOT · P50/P95/P99 tail latency · peak VRAM |
 | **Quantisation** | FP16 / BF16 / INT8 / AWQ / GPTQ comparison + throughput per GiB of VRAM |
 | **Output** | Markdown report · self-contained HTML report (inline SVG, no CDN) · Prometheus metrics · Grafana dashboard |
-| **Measured** | Benchmarked on **real hardware** (RTX 4060 Laptop, 8 GB): **30.8 tokens/s** peak, saturating at concurrency 2 — see [Measured results](#measured-results) |
-| **Verified** | 313 unit tests, ~7 s to run; full pipeline verifiable without a GPU |
+| **Measured** | Benchmarked on **real hardware** (RTX 4060 Laptop, 8 GB, `qwen2.5:7b` Q4_K_M): **50.0 tokens/s** peak at concurrency 16, flat from c2 onward while TTFT grows linearly — see [Measured results](#measured-results) |
+| **Verified** | 326 unit tests (~90 s, mostly the API suite); full pipeline verifiable without a GPU |
 | **Deployable** | One-command Docker Compose monitoring stack; works offline and on isolated networks |
 
 ### How it differs from "just writing a load-test script"
@@ -194,8 +195,10 @@ python scripts/run_bench.py \
 # Real Ollama (quantisation level is part of the model name)
 python scripts/run_bench.py \
     --engine ollama --base-url http://127.0.0.1:11434 \
-    --model qwen2.5:7b --quant q4_K_M
+    --model qwen2.5:7b --quant q4_K_M --report
 ```
+
+`--base-url` accepts both `http://host:8000` and `http://host:8000/v1`; the client normalises it. (Older versions appended `/v1` unconditionally, so either the docs' `/v1` form 404'd on every request.)
 
 ### Quantisation comparison
 
@@ -212,6 +215,7 @@ python scripts/run_bench.py --run-id quant-72b --output-dir data/results \
 ### Re-generating a report from existing results
 
 ```bash
+# --from-results takes the directory that holds the run's *.json files
 python scripts/run_bench.py --report-only --from-results data/results/demo
 ```
 
@@ -282,7 +286,7 @@ llm-inference-bench/
 │   ├── mock_engine.py        # OpenAI-compatible mock engine (verify without a GPU)
 │   └── gen_grafana_dashboard.py
 ├── deploy/                   # Dockerfile / docker-compose / Prometheus / Grafana
-├── tests/                    # 313 unit tests
+├── tests/                    # 326 unit tests
 └── data/results/             # Benchmark artefacts (JSON / CSV / reports)
 ```
 
@@ -306,13 +310,47 @@ Both `report.md` and `report.html` are produced.
 
 ## Measured results
 
-> The run below used **real hardware and a real model**, not the mock: an 8 GiB consumer GPU running
-> Ollama with `qwen2.5:7b` (Q4_K_M). The raw artefacts are **published in this repository** so you can
-> verify them, or recompute the report yourself:
+**Run of 2026-11-03 (current code).** Real hardware, real model: an 8 GiB RTX 4060 Laptop running
+Ollama `qwen2.5:7b` Q4_K_M, 256 output tokens, 16 requests per level. Artefacts:
+[`report.md`](data/results/rerun-20261103/report.md) ·
+[`report.html`](data/results/rerun-20261103/report.html) ·
+[raw JSON](data/results/rerun-20261103/ollama__qwen2.5_7b__q4_k_m.json).
+
+| Concurrency | Output tok/s | TTFT mean | TPOT mean | P99 latency | n |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 43.3 | 167 ms | 21.5 ms | 2.25 s | 16 |
+| 2 | 48.6 | 1094 ms | 19.7 ms | 3.85 s | 16 |
+| 4 | 49.4 | 2957 ms | 19.7 ms | 7.55 s | 16 |
+| 8 | 49.8 | 6687 ms | 19.7 ms | 14.94 s | 16 |
+| 16 | **50.0** | 14129 ms | 19.8 ms | 29.77 s | 32 |
+| 32 | 49.9 | 29095 ms | 19.8 ms | 59.51 s | 64 |
+
+What this run says:
+
+- **The card is at its bandwidth ceiling.** TPOT is 19.7 ms at every level: per-token decode speed does
+  not change with load. Aggregate throughput accordingly flattens at ~50 tok/s from c2.
+- **Everything above c2 is queueing.** TTFT grows almost exactly linearly (1.1 → 2.9 → 6.7 → 14.1 → 29.1 s)
+  while throughput stays flat. Adding concurrency buys no throughput here; it only buys waiting.
+- **Pick concurrency from the SLO, not the peak.** If TTFT must stay under 2 s, this machine supports
+  **c2**, even though the peak throughput number sits at c16. `sample_size` and `p99_reliable` are in
+  the JSON so a reader can see that n=16 is too small for a real P99 claim.
+
+> This run replaces the 2026-10-09 headline, which was produced by a runner that built a client per
+> request inside the timed window. That run is kept below as history: its artefacts are unchanged and
+> its numbers are the "before" side of the fix.
+
+### History: run of 2026-10-09 (pre-timing-fix)
+
+> ⚠️ Throughput here is understated (~27-38% by the repo's own arithmetic) and "saturates at
+> concurrency 2" may be an artefact of client construction inside the timed window. Kept as published
+> history, not as a current headline.
+>
+> The run used the same hardware and model; the raw artefacts are **published in this repository** so
+> you can verify them, or recompute the report yourself:
 >
 > - [`report.md`](data/results/run-20261009-103334/report.md) — full 7-section report (readable on GitHub)
 > - [`report.html`](data/results/run-20261009-103334/report.html) — self-contained chart version (inline SVG, no external assets)
-> - [`ollama__qwen2.5_7b__q4_k_m.json`](data/results/run-20261009-103334/ollama__qwen2.5_7b__q4_k_m.json) — raw results, feed it to `--report-only` to regenerate
+> - [`ollama__qwen2.5_7b__q4_k_m.json`](data/results/run-20261009-103334/ollama__qwen2.5_7b__q4_k_m.json) — raw results; point `--report-only --from-results` at its directory to regenerate
 >
 > ⓘ The `result_stem` field inside that JSON still uses the pre-fix format
 > (`ollama__qwen2.5:7b__q4_k_m`, **with a colon**), while the actual filename was produced by the

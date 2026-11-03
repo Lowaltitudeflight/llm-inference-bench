@@ -37,7 +37,7 @@ class UnifiedLLMClient:
         self.target = target
         self.timeout = timeout
         self._client = OpenAI(
-            base_url=f"{target.normalized_base_url()}/v1",
+            base_url=target.api_base(),
             api_key=target.api_key or "EMPTY",
             timeout=timeout,
             # 压测需要重试可控：失败就记为失败，不要静默重试掩盖问题
@@ -53,7 +53,7 @@ class UnifiedLLMClient:
         Returns:
             {"ok": bool, "models": [...], "error": str|None}
         """
-        url = f"{self.target.normalized_base_url()}/v1/models"
+        url = f"{self.target.api_base()}/models"
         headers = {"Authorization": f"Bearer {self.target.api_key or 'EMPTY'}"}
         try:
             with httpx.Client(timeout=min(self.timeout, 10.0)) as client:
@@ -154,6 +154,7 @@ class UnifiedLLMClient:
         token_count = 0
         usage_tokens: Optional[int] = None
         input_tokens = 0
+        finish_reason: Optional[str] = None
 
         for chunk in stream:
             now = time.perf_counter()
@@ -166,7 +167,10 @@ class UnifiedLLMClient:
             if not chunk.choices:
                 continue
 
-            delta = chunk.choices[0].delta
+            choice = chunk.choices[0]
+            if getattr(choice, "finish_reason", None):
+                finish_reason = choice.finish_reason
+            delta = choice.delta
             content = getattr(delta, "content", None)
             if content:
                 if first_token_at is None:
@@ -175,11 +179,30 @@ class UnifiedLLMClient:
 
         end = time.perf_counter()
 
-        # 优先用服务端回传的 usage（更准），拿不到则用累计 chunk 数
+        # 优先用服务端回传的 usage（更准），拿不到则用累计 chunk 数。
+        # 后者是「内容分片数」，不等于 token 数（一个 delta 可能含多个
+        # token），所以标记来源，报告里可据此判断 TPOT 是否可信。
+        usage_source = "server" if usage_tokens is not None else "estimated"
         output_tokens = usage_tokens if usage_tokens is not None else token_count
 
-        ttft = (first_token_at - start) if first_token_at is not None else None
-        generation_time = (end - first_token_at) if first_token_at is not None else None
+        # 200 但没有产出任何内容 token 的流不是成功：拒答、只有
+        # reasoning_content / tool_calls、或网关截断都会走到这里。
+        # 早期版本无条件 success=True，会让这类请求污染成功率与 P99。
+        if first_token_at is None or (output_tokens or 0) <= 0:
+            return RequestResult(
+                success=False,
+                total_latency=end - start,
+                output_tokens=0,
+                input_tokens=input_tokens,
+                finish_reason=finish_reason,
+                error=(
+                    "empty stream: no content token"
+                    + (f" (finish_reason={finish_reason})" if finish_reason else "")
+                ),
+            )
+
+        ttft = first_token_at - start
+        generation_time = end - first_token_at
 
         return RequestResult(
             success=True,
@@ -188,6 +211,8 @@ class UnifiedLLMClient:
             generation_time=generation_time,
             output_tokens=output_tokens or 0,
             input_tokens=input_tokens,
+            finish_reason=finish_reason,
+            usage_source=usage_source,
         )
 
     def _complete_once(

@@ -18,8 +18,8 @@ import shutil
 import subprocess
 import threading
 import time
-from dataclasses import dataclass, asdict
-from typing import Any, Dict, List, Optional
+from dataclasses import asdict, dataclass
+from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +29,7 @@ QUERY_TIMEOUT = 5.0
 # 查询字段：索引 / 卡名 / 显存总量 / 显存已用 / 利用率 / 功耗 / 温度
 QUERY_FIELDS = (
     "index,name,memory.total,memory.used,utilization.gpu,"
-    "power.draw,temperature.gpu"
+    "power.draw,temperature.gpu,driver_version"
 )
 
 
@@ -47,6 +47,7 @@ class GpuSample:
     util_percent: Optional[float] = None
     power_watts: Optional[float] = None
     temperature_c: Optional[float] = None
+    driver_version: Optional[str] = None
     # 采样时刻（相对压测开始的秒数），由 Recorder 填充
     t: float = 0.0
 
@@ -143,6 +144,7 @@ def query_gpus() -> Dict[str, Any]:
                 util_percent=_to_float(row[4]),
                 power_watts=_to_float(row[5]),
                 temperature_c=_to_float(row[6]),
+                driver_version=row[7] or None,
             )
         )
 
@@ -163,9 +165,16 @@ class GpuMonitor:
     以线程实现，不阻塞主流程；``stop()`` 后可按时间戳对齐压测各阶段。
     """
 
-    def __init__(self, interval: float = 0.5, enabled: bool = True):
+    def __init__(
+        self,
+        interval: float = 0.5,
+        enabled: bool = True,
+        sink: Optional[Callable[[List["GpuSample"]], None]] = None,
+    ):
         self.interval = max(0.05, interval)
         self.enabled = enabled
+        # 采样旁路：每个采样周期把本批样本交给它（Prometheus / Grafana 用）
+        self.sink = sink
         self.available = False
         self.message = ""
         self._samples: List[GpuSample] = []
@@ -233,6 +242,11 @@ class GpuMonitor:
                 batch.append(sample)
             with self._lock:
                 self._samples.extend(batch)
+            if self.sink is not None and batch:
+                try:
+                    self.sink(batch)
+                except Exception:  # 旁路失败同样不能影响压测
+                    logger.debug("GPU 采样 sink 失败（忽略）", exc_info=True)
             return batch
         except Exception as exc:  # 监控绝不能影响压测
             logger.debug("GPU 采样失败（忽略）: %s", exc)

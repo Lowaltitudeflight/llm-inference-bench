@@ -346,3 +346,25 @@ def _render(metrics: prom.BenchMetrics) -> str:
     from prometheus_client import generate_latest
 
     return generate_latest(metrics.registry).decode("utf-8")
+
+class TestReportPathSafety:
+    """报告读取不能被路径穿越逃出输出目录。"""
+
+    def test_dotdot_filename_blocked(self, client):
+        r = client.get("/reports/run-1/..%5C..%5Csecret.json")
+        assert r.status_code == 404
+
+    def test_dotdot_run_id_blocked(self, client):
+        r = client.get("/reports/..%2F..%2Fetc/passwd")
+        assert r.status_code == 404
+
+    def test_legit_missing_report_is_404(self, client):
+        r = client.get("/reports/run-does-not-exist/report.html")
+        assert r.status_code == 404
+
+    def test_compare_rejects_output_dir_outside_results(self, client):
+        r = client.post(
+            "/compare",
+            json={"run_id": "run-1", "output_dir": "C:/Windows"},
+        )
+        assert r.status_code == 400

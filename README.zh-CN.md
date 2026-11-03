@@ -6,7 +6,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/tests-313%20passed-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-326%20passed-brightgreen.svg)](tests/)
 [![Version](https://img.shields.io/badge/release-v0.1.0-orange.svg)](https://github.com/Lowaltitudeflight/llm-inference-bench/releases)
 
 一句话定位：**把「部署完大模型之后怎么证明它跑得好」这件事工程化。**
@@ -26,8 +26,9 @@ pip install -r requirements.txt
 python scripts/mock_engine.py --port 8102 &
 export NO_PROXY="127.0.0.1,localhost"
 export VLLM_BASE_URL="http://127.0.0.1:8102" VLLM_MODEL="mock-72b"
-python scripts/run_bench.py --engine vllm --quant fp16 --levels 1,2,4,8,16,32
+python scripts/run_bench.py --engine vllm --quant fp16 --levels 1,2,4,8,16,32 --report
 # → data/results/<run>/report.html  （自包含 HTML，隔离内网可直接打开）
+# 报告由 --report 生成；只做扫描的话只有 JSON/CSV
 ```
 
 | | |
@@ -36,8 +37,8 @@ python scripts/run_bench.py --engine vllm --quant fp16 --levels 1,2,4,8,16,32
 | **指标** | 吞吐 tokens/s · TTFT 首包延迟 · TPOT · P50/P95/P99 尾延迟 · 显存峰值 |
 | **量化** | FP16 / BF16 / INT8 / AWQ / GPTQ 横向对比 + 每 GiB 显存吞吐 |
 | **输出** | Markdown 报告 · 自包含 HTML 报告（内联 SVG，无 CDN）· Prometheus 指标 · Grafana 面板 |
-| **实测** | 已在 RTX 4060 Laptop 8GB 完成**真机**压测：峰值 **30.8 tokens/s**，并发 2 即饱和 —— 见 [实测数据](#实测数据) |
-| **验证** | 313 个单元测试，约 7 秒跑完；无 GPU 亦可端到端验证 |
+| **实测** | 已在 RTX 4060 Laptop 8GB（`qwen2.5:7b` Q4_K_M）完成**真机**压测：峰值 **50.0 tokens/s** @ 并发 16，吞吐从 c2 起就持平，TTFT 则线性增长 —— 见 [实测数据](#实测数据) |
+| **验证** | 326 个单元测试（约 90 秒，主要是 API 套件）；无 GPU 亦可端到端验证 |
 | **落地** | Docker Compose 一键起监控栈；离线安装与隔离内网可用 |
 
 ### 它和「随手写个压测脚本」的区别
@@ -221,6 +222,7 @@ python scripts/run_bench.py --run-id quant-72b --output-dir data/results \
 ### 从已有结果重新出报告
 
 ```bash
+# --from-results 传的是放 *.json 的目录
 python scripts/run_bench.py --report-only --from-results data/results/demo
 ```
 
@@ -290,7 +292,7 @@ llm-inference-bench/
 │   ├── mock_engine.py        # OpenAI 兼容 mock 引擎（无 GPU 也能验证）
 │   └── gen_grafana_dashboard.py
 ├── deploy/                   # Dockerfile / docker-compose / Prometheus / Grafana
-├── tests/                    # 313 个单元测试
+├── tests/                    # 326 个单元测试
 └── data/results/             # 压测产物（JSON / CSV / 报告）
 ```
 
@@ -314,7 +316,40 @@ llm-inference-bench/
 
 ## 实测数据
 
-> 下面这次运行是**真机真模型**，不是 mock：8 GiB 消费级显卡 + Ollama +
+**2026-11-03 运行（当前代码）。** 真机真模型：8 GiB RTX 4060 Laptop + Ollama `qwen2.5:7b` Q4_K_M，
+输出 256 token，每档 16 个请求。产物：
+[`report.md`](data/results/rerun-20261103/report.md) ·
+[`report.html`](data/results/rerun-20261103/report.html) ·
+[原始 JSON](data/results/rerun-20261103/ollama__qwen2.5_7b__q4_k_m.json)。
+
+| 并发 | 输出 tok/s | TTFT 均值 | TPOT 均值 | P99 延迟 | n |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 43.3 | 167 ms | 21.5 ms | 2.25 s | 16 |
+| 2 | 48.6 | 1094 ms | 19.7 ms | 3.85 s | 16 |
+| 4 | 49.4 | 2957 ms | 19.7 ms | 7.55 s | 16 |
+| 8 | 49.8 | 6687 ms | 19.7 ms | 14.94 s | 16 |
+| 16 | **50.0** | 14129 ms | 19.8 ms | 29.77 s | 32 |
+| 32 | 49.9 | 29095 ms | 19.8 ms | 59.51 s | 64 |
+
+这组数字说明：
+
+- **卡的带宽已经打满。** 每一档的 TPOT 都是 19.7 ms——单 token 解码速度不随负载变化，
+  所以聚合吞吐从 c2 起就卡在 ~50 tok/s。
+- **c2 以上全是排队。** TTFT 几乎线性增长（1.1 → 2.9 → 6.7 → 14.1 → 29.1 s），
+  吞吐却不动。加并发不买吞吐，只买等待。
+- **并发要按 SLO 选，不是按峰值选。** 若要求 TTFT < 2 s，这台机器只到 **c2**，
+  尽管峰值吞吐出现在 c16。JSON 里有 `sample_size` 与 `p99_reliable`，
+  读者能看到 n=16 并不足以支撑真正的 P99 结论。
+
+> 这份运行取代了 2026-10-09 的旧结论——那次由"每个请求新建客户端且计入计时窗口"的 runner 产出。
+> 旧产物原样保留在下面，作为修复前的对照。
+
+### 历史：2026-10-09 运行（计时修复前）
+
+> ⚠️ 这里的吞吐被低估（按仓库自己的算法约 27~38%），"并发 2 就饱和"可能是构造开销造成的假象。
+> 作为已发布的历史保留，不再作为当前结论引用。
+>
+> 这次运行用的是**真机真模型**，不是 mock：8 GiB 消费级显卡 + Ollama +
 > `qwen2.5:7b`（Q4_K_M）。原始产物**全部随仓库发布**，可直接核对，也可以自己复算：
 >
 > - [`report.md`](data/results/run-20261009-103334/report.md) —— 完整 7 章节报告（GitHub 可直接阅读）

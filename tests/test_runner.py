@@ -54,9 +54,9 @@ def make_stream_transport(
         per_token_seconds: 相邻 token 的间隔。
         fail_first: 前 N 次请求返回错误（用于测失败路径）。
         fail_status: 失败时返回的 HTTP 状态码。
-        counter: 外部传入的计数器。``run_stage`` 会为**每个请求**新建
-            客户端（刻意如此，避免连接池排队），因此「前 N 次失败」
-            的计数必须跨 transport 实例共享，否则每个实例都从 0 数起。
+        counter: 外部传入的计数器。``run_stage`` 会为每个并发通道建一个
+            客户端（现在只在档位开始时建一次），「前 N 次失败」的计数
+            仍需跨 transport 实例共享。
     """
     state = counter if counter is not None else {"calls": 0}
 
@@ -276,8 +276,9 @@ class TestLoadRunner:
             runner._restore()
 
         assert stage.concurrency == 2
-        assert stage.total_requests == 2
-        assert stage.success_requests == 2
+        # 默认样本量是 max(16, 2*concurrency)，不再是「等于并发数」
+        assert stage.total_requests == 16
+        assert stage.success_requests == 16
         assert stage.failure_rate == 0.0
         assert stage.ttft_mean is not None
         assert stage.tpot_mean is not None
@@ -285,13 +286,25 @@ class TestLoadRunner:
         assert stage.wall_time is not None
 
     def test_requests_scale_with_concurrency(self):
-        """requests_per_level 未设时，请求数应等于并发数。"""
+        """requests_per_level 未设时，请求数取 max(16, 2*并发)。
+
+        旧行为是「等于并发数」，导致并发 1 的档位只有 1 个样本，
+        P99 退化成最大值却仍被当作尾延迟结论。
+        """
         runner = self._runner(make_stream_transport(tokens=5))
         try:
             stage = runner.run_stage(4)
         finally:
             runner._restore()
-        assert stage.total_requests == 4
+        assert stage.total_requests == 16
+
+    def test_default_sample_size_scales_past_the_floor(self):
+        runner = self._runner(make_stream_transport(tokens=3))
+        try:
+            stage = runner.run_stage(16)
+        finally:
+            runner._restore()
+        assert stage.total_requests == 32
 
     def test_requests_per_level_override(self):
         runner = self._runner(
@@ -334,17 +347,19 @@ class TestLoadRunner:
             stage = runner.run_stage(2)
         finally:
             runner._restore()
-        assert stage.total_requests == 2  # 预热 3 次被丢弃
+        assert stage.total_requests == 16  # 预热 3 次被丢弃，16 个有效请求
 
     def test_failures_recorded_and_classified(self):
         """部分请求失败时，失败要进统计且档位可被标记不稳定。
 
-        ``warmup_requests=0`` 时所有请求都是有效请求，因此
-        前 2 次请求失败会让该档位的 2 个请求全失败。
+        ``warmup_requests=0`` 且 ``requests_per_level=2`` 时两个请求都是
+        有效请求，前 2 次失败会让该档位 100% 失败并被标记不稳定。
         """
         runner = self._runner(
             None,
-            bench=self._bench(warmup_requests=0, max_failure_rate=0.2),
+            bench=self._bench(
+                warmup_requests=0, max_failure_rate=0.2, requests_per_level=2
+            ),
             fail_first=2,
             tokens=5,
         )
@@ -363,7 +378,12 @@ class TestLoadRunner:
 
     def test_partial_failure_rate(self):
         """4 个请求里 2 个失败 => 50% 失败率。"""
-        runner = self._runner(None, bench=self._bench(warmup_requests=0), fail_first=2, tokens=5)
+        runner = self._runner(
+            None,
+            bench=self._bench(warmup_requests=0, requests_per_level=4),
+            fail_first=2,
+            tokens=5,
+        )
         try:
             stage = runner.run_stage(4)
         finally:
@@ -387,7 +407,7 @@ class TestLoadRunner:
         finally:
             runner._restore()
 
-        assert stage.total_requests == 2
+        assert stage.total_requests == 16
         assert stage.success_requests == 0
         assert stage.failure_rate == 1.0
         assert stage.unstable is True
@@ -468,3 +488,88 @@ class TestEndToEndSanity:
         assert per_request_total == pytest.approx(200.0)  # 4 * 50
         assert m.throughput_output == pytest.approx(400 / 2.2)
         assert m.throughput_output < per_request_total
+
+
+
+
+class TestClientLifecycle:
+    """客户端构造必须发生在计时窗口之外。"""
+
+    def test_client_construction_is_not_counted_in_wall_time(self):
+        import bench.runner as runner_mod
+        import time as _time
+
+        original = runner_mod.UnifiedLLMClient
+        transport = make_stream_transport(
+            tokens=2, ttft_seconds=0.0, per_token_seconds=0.0
+        )
+        target = EngineTarget(name="vllm", base_url="http://mock:8000", model="mock")
+
+        def patched(t, timeout=120.0):
+            _time.sleep(2.0)  # 模拟建连接 / SSL context 的开销
+            client = original(t, timeout=timeout)
+            client._client = client._client.__class__(
+                base_url=t.api_base(),
+                api_key="EMPTY",
+                timeout=timeout,
+                max_retries=0,
+                http_client=httpx.Client(transport=transport, base_url=t.api_base()),
+            )
+            return client
+
+        bench = BenchConfig(
+            concurrency_levels=[2],
+            requests_per_level=8,
+            warmup_requests=0,
+            stream=True,
+            prompt="hi",
+        )
+        runner_mod.UnifiedLLMClient = patched
+        try:
+            runner = LoadRunner(target, bench)
+            stage = runner.run_stage(2)
+        finally:
+            runner_mod.UnifiedLLMClient = original
+
+        assert stage.total_requests == 8
+        # 两个客户端各睡 2 秒；若构造进入计时窗口，wall_time 必然 > 4 秒
+        assert stage.wall_time < 3.0
+
+    def test_empty_stream_counts_as_failure(self):
+        """200 但没有 content token 的流不能算成功。"""
+        nl = chr(10)
+        payload = "".join(
+            [
+                'data: {"choices":[{"delta":{},"finish_reason":null}]}' + nl + nl,
+                'data: {"choices":[],"usage":{"completion_tokens":0,"prompt_tokens":5}}'
+                + nl
+                + nl,
+                "data: [DONE]" + nl + nl,
+            ]
+        )
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200, headers={"content-type": "text/event-stream"}, content=payload
+            )
+
+        target = EngineTarget(name="vllm", base_url="http://mock:8000", model="mock")
+        client = UnifiedLLMClient(target)
+        client._client = client._client.__class__(
+            base_url=target.api_base(),
+            api_key="EMPTY",
+            timeout=5,
+            max_retries=0,
+            http_client=httpx.Client(
+                transport=httpx.MockTransport(handler), base_url=target.api_base()
+            ),
+        )
+        try:
+            res = client.complete(
+                prompt="hi", max_tokens=8, temperature=0.0, stream=True
+            )
+        finally:
+            client.close()
+
+        assert res.success is False
+        assert "empty stream" in (res.error or "")

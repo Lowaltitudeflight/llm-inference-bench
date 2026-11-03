@@ -8,6 +8,8 @@
 from __future__ import annotations
 
 import logging
+import queue
+import random
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -41,6 +43,10 @@ class LoadRunner:
         self.config = config
         self.monitor_config = monitor_config
         self.monitor: Optional[GpuMonitor] = None
+        # 每完成一个请求回调一次，供 Prometheus 等旁路消费
+        self.on_result: Optional[Callable[[RequestResult], None]] = None
+        # 每批 GPU 采样回调一次，同上
+        self.monitor_sink: Optional[Callable[[Any], None]] = None
         # 每档位显存峰值，供报告按并发对齐显存曲线
         self.stage_vram_peak: Dict[int, Optional[float]] = {}
 
@@ -52,15 +58,17 @@ class LoadRunner:
 
         执行流程：
         1. 预热（结果丢弃，避免首请求的模型预热成本污染数据）
-        2. 并发发起请求，墙壁时钟从**首个请求发出前**开始计时
-        3. 收集全部结果并聚合
+        2. **先**建好 concurrency 个客户端——构造与关闭都发生在计时窗口
+           之外。早期版本在每个请求里新建客户端，构造耗时进了吞吐分母
+           却没进任何请求延迟，吞吐被系统性低估，而且后半段请求可能晚
+           几十秒才发出，"并发 N" 其实并不成立
+        3. 按批发起请求，每批用 Barrier 对齐起跑，保证是真的同时在跑
+        4. 全部结束后关闭客户端，再聚合
 
         Args:
             concurrency: 该档位并发数。
         """
-        total = self.config.requests_per_level or concurrency
-        # 保证每个并发通道至少分到一个请求
-        total = max(total, concurrency)
+        total = self.config.requests_for(concurrency)
 
         logger.info(
             "档位 concurrency=%d，请求总数=%d，预热=%d",
@@ -74,40 +82,69 @@ class LoadRunner:
         results: List[RequestResult] = []
         lock = threading.Lock()
 
-        def worker() -> RequestResult:
-            # 每路请求自建客户端：避免连接池复用导致的排队
-            client = UnifiedLLMClient(self.target, timeout=self.config.timeout)
+        clients = [
+            UnifiedLLMClient(self.target, timeout=self.config.timeout)
+            for _ in range(concurrency)
+        ]
+        client_pool: "queue.Queue[UnifiedLLMClient]" = queue.Queue()
+        for client in clients:
+            client_pool.put(client)
+
+        def work(barrier: threading.Barrier, prompt: str) -> RequestResult:
+            client = client_pool.get()
             try:
+                barrier.wait()
                 return client.complete(
-                    prompt=self.config.prompt,
+                    prompt=prompt,
                     max_tokens=self.config.max_tokens,
                     temperature=self.config.temperature,
                     stream=self.config.stream,
                 )
             finally:
-                client.close()
+                client_pool.put(client)
 
-        wall_start = time.perf_counter()
+        prompts = self._prompts(total)
+
         monitor = self.monitor
         # 监控若可用，档位内额外高频采一次样，保证曲线覆盖加压时段
         monitor_before = len(monitor.samples) if monitor and monitor.available else 0
-        with ThreadPoolExecutor(max_workers=concurrency) as pool:
-            futures = [pool.submit(worker) for _ in range(total)]
-            for fut in as_completed(futures):
-                try:
-                    res = fut.result()
-                except Exception as exc:
-                    res = RequestResult(
-                        success=False,
-                        error=f"{type(exc).__name__}: {exc}",
-                    )
-                with lock:
-                    results.append(res)
+
+        wall_start = time.perf_counter()
+        try:
+            with ThreadPoolExecutor(max_workers=concurrency) as pool:
+                for offset in range(0, total, concurrency):
+                    wave = min(concurrency, total - offset)
+                    barrier = threading.Barrier(wave)
+                    futures = [
+                        pool.submit(work, barrier, prompts[offset + i])
+                        for i in range(wave)
+                    ]
+                    for fut in as_completed(futures):
+                        try:
+                            res = fut.result()
+                        except Exception as exc:
+                            res = RequestResult(
+                                success=False,
+                                error=f"{type(exc).__name__}: {exc}",
+                            )
+                        if self.on_result is not None:
+                            try:
+                                self.on_result(res)
+                            except Exception:  # 旁路回调不能影响压测
+                                logger.debug("on_result 回调失败", exc_info=True)
+                        with lock:
+                            results.append(res)
+        finally:
+            for client in clients:
+                client.close()
         wall_time = time.perf_counter() - wall_start
 
-        # 记录该档位的显存增量峰值（相对加压前），反映并发带来的额外占用
+        # 记录该档位的显存峰值（结束下标固定，避免下一档的采样串进来）
         if monitor and monitor.available:
-            self.stage_vram_peak[concurrency] = self._stage_vram_peak(monitor_before)
+            monitor_after = len(monitor.samples)
+            self.stage_vram_peak[concurrency] = self._stage_vram_peak(
+                monitor_before, monitor_after
+            )
 
         stage = aggregate(
             results,
@@ -124,15 +161,30 @@ class LoadRunner:
             )
         return stage
 
-    def _stage_vram_peak(self, since_index: int) -> Optional[float]:
+    def _prompts(self, count: int) -> List[str]:
+        """按 seed 生成请求序列。
+
+        prompt_pool 为空时退化为固定 prompt（与旧行为一致）；填了池子则
+        逐请求随机抽样，避免所有请求命中服务端 prefix cache —— 同一个
+        prompt 反复打会把 TTFT 压低、吞吐抬高，测出来的是缓存不是模型。
+        """
+        pool = self.config.prompt_pool or [self.config.prompt]
+        rng = random.Random(self.config.seed)
+        return [rng.choice(pool) for _ in range(count)]
+
+    def _stage_vram_peak(
+        self, since_index: int, until_index: Optional[int] = None
+    ) -> Optional[float]:
         """取加压期间所有卡的显存总占用峰值（MiB）。
 
         Args:
             since_index: 只统计该下标之后的样本（即本档位加压期间）。
+            until_index: 结束下标（不含）；None 表示取到当前最新样本。
+                不传结束下标会让下一档位的采样被算进上一档。
         """
         if not self.monitor:
             return None
-        batch = self.monitor.samples[since_index:]
+        batch = self.monitor.samples[since_index:until_index]
         if not batch:
             return None
         # 按时间点聚合所有卡的显存之和，再取最大
@@ -191,11 +243,14 @@ class LoadRunner:
         """
         levels = sorted(levels or self.config.concurrency_levels)
         stages: List[StageMetrics] = []
+        # 同一个 runner 重复 sweep 时，旧档位的峰值不应残留
+        self.stage_vram_peak.clear()
 
         if self.monitor_config is not None:
             self.monitor = GpuMonitor(
                 interval=self.monitor_config.interval,
                 enabled=self.monitor_config.enabled,
+                sink=self.monitor_sink,
             )
             self.monitor.start()
 

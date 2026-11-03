@@ -25,6 +25,7 @@ GET  ``/metrics``         Prometheus 指标
 from __future__ import annotations
 
 import logging
+import re
 import threading
 import time
 import uuid
@@ -47,10 +48,10 @@ from config.settings import (
     default_engines,
 )
 from engines.client import UnifiedLLMClient
+from metrics import prometheus as prom
 from metrics.store import build_result, new_run_id, save_result
 from monitor.quant import QuantGroup, compare, from_result_dicts
 from report import generate_reports
-from metrics import prometheus as prom
 
 logger = logging.getLogger(__name__)
 
@@ -255,6 +256,12 @@ def _run_job(job_id: str, req: BenchRequest) -> None:
                 BENCH,
                 monitor_config=MONITOR if req.enable_monitor and MONITOR.enabled else None,
             )
+            # 逐请求指标：之前只写了档位聚合，Grafana 的请求速率 / 延迟
+            # 分位 / GPU 面板因此永远是 No data
+            runner.on_result = lambda res, _t=target: prom.METRICS.observe_request(
+                res, _t.name, _t.model, _t.quantization
+            )
+            runner.monitor_sink = prom.METRICS.observe_gpu
             health = runner.health()
 
             def on_stage(stage, _t=target) -> None:
@@ -476,10 +483,28 @@ def list_reports(limit: int = 20) -> Dict[str, Any]:
     }
 
 
+_RUN_ID_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+
+
+def _safe_report_path(run_id: str, filename: str) -> Path:
+    r"""把 run_id/filename 限制在输出目录内。
+
+    直接拼路径时，``filename=..\..\secret.json`` 在 Windows 上可以
+    逃出 results 目录读任意文件；run_id 也可能带 ``..``。
+    """
+    if not _RUN_ID_RE.match(run_id) or ".." in run_id:
+        raise HTTPException(404, "报告不存在")
+    base = Path(BENCH.output_dir).resolve()
+    candidate = (base / run_id / filename).resolve()
+    if not candidate.is_relative_to(base):
+        raise HTTPException(404, "报告不存在")
+    return candidate
+
+
 @app.get("/reports/{run_id}/{filename}")
 def get_report(run_id: str, filename: str) -> Response:
     """按 run_id + 文件名读取报告。"""
-    path = Path(BENCH.output_dir) / run_id / filename
+    path = _safe_report_path(run_id, filename)
     if not path.exists() or path.suffix not in {".html", ".md", ".json", ".csv"}:
         raise HTTPException(404, "报告不存在")
     media = {
@@ -494,7 +519,13 @@ def get_report(run_id: str, filename: str) -> Response:
 @app.post("/compare")
 def post_compare(req: CompareRequest) -> Dict[str, Any]:
     """对某次 run 的多份结果做量化横向对比。"""
-    root = Path(req.output_dir) if req.output_dir else Path(BENCH.output_dir)
+    if not _RUN_ID_RE.match(req.run_id) or ".." in req.run_id:
+        raise HTTPException(400, "run_id 只能包含字母、数字、点、下划线和短横线")
+    allowed_root = Path(BENCH.output_dir).resolve()
+    root = Path(req.output_dir).resolve() if req.output_dir else allowed_root
+    # output_dir 不允许指向结果目录之外
+    if not root.is_relative_to(allowed_root):
+        raise HTTPException(400, "output_dir 必须位于结果目录之内")
     run_dir = root / req.run_id
     if not run_dir.exists():
         raise HTTPException(404, f"结果目录不存在：{run_dir}")
