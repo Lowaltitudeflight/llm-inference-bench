@@ -7,6 +7,40 @@
 
 ### Fixed
 
+- **客户端构造计入墙壁时钟，吞吐被系统性低估**
+  `run_stage()` 原先在每个请求的 worker 里新建 `UnifiedLLMClient`，而
+  `wall_start` 在 worker 之外，于是建连接 / SSL context 的开销进了吞吐
+  分母却没进任何请求延迟；后半段请求还可能晚几十秒才发出，"并发 N"
+  并不成立。现在每档位只建 `concurrency` 个客户端、构造与关闭都在计时
+  窗口之外，并用 `Barrier` 让每批请求同时起跑。
+
+- **`--base-url .../v1` 被再拼一次 `/v1`，README 里的真实命令全部 404**
+  新增 `EngineTarget.api_base()`，`http://host:8000` 与
+  `http://host:8000/v1` 两种写法都接受。
+
+- **200 但没有 content token 的流被计为成功**
+  拒答、只有 `reasoning_content`/`tool_calls`、网关截断都会返回 200。
+  现在这类请求判失败并记录 `finish_reason`，不再污染成功率与 P99。
+
+- **每档请求数默认等于并发数，P99 退化成最大值**
+  默认改为 `max(16, 2 * 并发)`，并新增 `--requests-per-level` 显式覆盖；
+  `StageMetrics` 增加 `sample_size` / `p99_reliable` 字段。
+
+- **失败请求不进延迟统计，高并发档 P99 偏乐观**
+  新增 `latency.p99_including_failures`，把失败请求耗时作为下界一并
+  暴露；`summarize_run()` 不再把 unstable 档位选为「最佳吞吐」。
+
+- **`/reports/{run_id}/{filename}` 在 Windows 上可路径穿越读任意文件**
+  run_id 走白名单正则，最终路径必须落在结果目录内；`/compare` 的
+  `output_dir` 同样受限。
+
+- **同一秒提交的两个任务共用 run id，静默覆盖结果**
+  `new_run_id()` 追加 6 位随机后缀，并补「同一秒 200 次不重复」测试。
+
+- **Grafana 约 9 个面板永远 No data**
+  逐请求指标与 GPU 采样此前从未写入生产路径。现在 `LoadRunner` 暴露
+  `on_result` / `monitor_sink` 回调，API 层接到 Prometheus。
+
 - **结果文件在 Windows 上被写进 NTFS 备用数据流，导致数据丢失**
   `_safe_slug()` 原先放行 `:`，而 Ollama 的模型名形如 `qwen2.5:7b` ——
   `:` 在 Windows 上是 NTFS 备用数据流（ADS）的分隔符，因此
@@ -20,11 +54,21 @@
 
 ### Added
 
+- `pyproject.toml`：`pip install .` 可用，`llmbench` 命令行入口，
+  `requires-python >= 3.10`，依赖加上限。
+- 环境信息补 GPU 型号 / 驱动版本，报告里 "GPU model and driver" 不再落空。
+- 单元测试 313 → 326：新增客户端构造计时、空流判定、`api_base` 归一化、
+  路径穿越、run id 唯一性等回归测试。
 - 单元测试 302 → 313 个：新增 `TestResultStemFilenameSafety`，
   覆盖 Windows 保留字符（`: * ? " < > | / \`）与「生成的 stem 必须能当真实文件名用」。
 - README 新增「实测数据」章节，并随仓库提交一份**真机压测原始产物**
   （`data/results/run-20261009-103334/`，RTX 4060 Laptop 8GB + ollama +
   `qwen2.5:7b` Q4_K_M），作为可核对的实测数据佐证。
+
+### Removed
+
+- `requirements.txt` 中未被任何代码 import 的 `numpy` / `pandas` /
+  `python-dotenv` / `jinja2`。
 
 ### Changed
 

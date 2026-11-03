@@ -6,7 +6,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/tests-313%20passed-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-326%20passed-brightgreen.svg)](tests/)
 [![Version](https://img.shields.io/badge/release-v0.1.0-orange.svg)](https://github.com/Lowaltitudeflight/llm-inference-bench/releases)
 
 一句话定位：**把「部署完大模型之后怎么证明它跑得好」这件事工程化。**
@@ -26,8 +26,9 @@ pip install -r requirements.txt
 python scripts/mock_engine.py --port 8102 &
 export NO_PROXY="127.0.0.1,localhost"
 export VLLM_BASE_URL="http://127.0.0.1:8102" VLLM_MODEL="mock-72b"
-python scripts/run_bench.py --engine vllm --quant fp16 --levels 1,2,4,8,16,32
+python scripts/run_bench.py --engine vllm --quant fp16 --levels 1,2,4,8,16,32 --report
 # → data/results/<run>/report.html  （自包含 HTML，隔离内网可直接打开）
+# 报告由 --report 生成；只做扫描的话只有 JSON/CSV
 ```
 
 | | |
@@ -37,7 +38,7 @@ python scripts/run_bench.py --engine vllm --quant fp16 --levels 1,2,4,8,16,32
 | **量化** | FP16 / BF16 / INT8 / AWQ / GPTQ 横向对比 + 每 GiB 显存吞吐 |
 | **输出** | Markdown 报告 · 自包含 HTML 报告（内联 SVG，无 CDN）· Prometheus 指标 · Grafana 面板 |
 | **实测** | 已在 RTX 4060 Laptop 8GB 完成**真机**压测：峰值 **30.8 tokens/s**，并发 2 即饱和 —— 见 [实测数据](#实测数据) |
-| **验证** | 313 个单元测试，约 7 秒跑完；无 GPU 亦可端到端验证 |
+| **验证** | 326 个单元测试（约 90 秒，主要是 API 套件）；无 GPU 亦可端到端验证 |
 | **落地** | Docker Compose 一键起监控栈；离线安装与隔离内网可用 |
 
 ### 它和「随手写个压测脚本」的区别
@@ -221,6 +222,7 @@ python scripts/run_bench.py --run-id quant-72b --output-dir data/results \
 ### 从已有结果重新出报告
 
 ```bash
+# --from-results 传的是放 *.json 的目录
 python scripts/run_bench.py --report-only --from-results data/results/demo
 ```
 
@@ -290,7 +292,7 @@ llm-inference-bench/
 │   ├── mock_engine.py        # OpenAI 兼容 mock 引擎（无 GPU 也能验证）
 │   └── gen_grafana_dashboard.py
 ├── deploy/                   # Dockerfile / docker-compose / Prometheus / Grafana
-├── tests/                    # 313 个单元测试
+├── tests/                    # 326 个单元测试
 └── data/results/             # 压测产物（JSON / CSV / 报告）
 ```
 

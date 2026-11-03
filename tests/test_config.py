@@ -15,6 +15,7 @@ import pytest
 
 import config.settings as settings
 from config.settings import (
+    BenchConfig,
     EngineTarget,
     _env,
     _env_float,
@@ -250,3 +251,35 @@ class TestBenchConfigIndependence:
 
         d = BenchConfig().output_dir
         assert str(d).startswith(str(BASE_DIR))
+
+class TestApiBase:
+    """base_url 带不带 /v1 都必须拼出同一个 OpenAI 兼容基址。"""
+
+    def _target(self, url: str) -> EngineTarget:
+        return EngineTarget(name="vllm", base_url=url, model="m")
+
+    def test_plain_host(self):
+        assert self._target("http://127.0.0.1:8000").api_base() == (
+            "http://127.0.0.1:8000/v1"
+        )
+
+    def test_already_has_v1(self):
+        assert self._target("http://127.0.0.1:8000/v1").api_base() == (
+            "http://127.0.0.1:8000/v1"
+        )
+
+    def test_trailing_slash_after_v1(self):
+        assert self._target("http://127.0.0.1:8000/v1/").api_base() == (
+            "http://127.0.0.1:8000/v1"
+        )
+
+    def test_default_requests_for_scales_with_concurrency(self):
+        bench = BenchConfig()
+        assert bench.requests_for(1) == 16
+        assert bench.requests_for(8) == 16
+        assert bench.requests_for(32) == 64
+
+    def test_explicit_requests_per_level_wins_but_never_below_concurrency(self):
+        bench = BenchConfig(requests_per_level=8)
+        assert bench.requests_for(4) == 8
+        assert bench.requests_for(16) == 16

@@ -281,7 +281,10 @@ class TestAggregate:
             "timing",
             "errors",
         }
-        assert set(d["latency"]) == {"mean", "p50", "p95", "p99", "min", "max", "stdev"}
+        assert set(d["latency"]) == {
+            "mean", "p50", "p95", "p99", "p99_including_failures",
+            "min", "max", "stdev",
+        }
         assert "output_tokens_per_second" in d["throughput"]
         assert "wall_time" in d["timing"]
 

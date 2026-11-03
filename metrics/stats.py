@@ -55,6 +55,12 @@ class RequestResult:
     # 失败时的错误信息
     error: Optional[str] = None
 
+    # 服务端返回的 finish_reason（stop / length / ...）；缺失说明流被截断
+    finish_reason: Optional[str] = None
+
+    # output_tokens 的来源：server = 服务端 usage；estimated = 内容分片数
+    usage_source: str = "server"
+
     # 单 token 生成延迟
     @property
     def tpot(self) -> Optional[float]:
@@ -157,6 +163,16 @@ class StageMetrics:
     # 请求速率
     request_rate: Optional[float] = None
 
+    # 端到端延迟：把失败请求的耗时也计入（存活者偏差的下界）
+    latency_p99_including_failures: Optional[float] = None
+
+    # 该档位的有效样本量（成功请求数），P99 的可靠性据此判断
+    sample_size: int = 0
+    # 样本量足够（>=100）才有意义的 P99 才标 True
+    p99_reliable: bool = False
+    # 有多少请求的 output_tokens 是分片估算值（无 usage）
+    estimated_token_requests: int = 0
+
     # 失败率
     failure_rate: float = 0.0
     # 该档位是否被视为不稳定
@@ -174,11 +190,15 @@ class StageMetrics:
             "failed_requests": self.failed_requests,
             "failure_rate": self.failure_rate,
             "unstable": self.unstable,
+            "sample_size": self.sample_size,
+            "p99_reliable": self.p99_reliable,
+            "estimated_token_requests": self.estimated_token_requests,
             "latency": {
                 "mean": self.latency_mean,
                 "p50": self.latency_p50,
                 "p95": self.latency_p95,
                 "p99": self.latency_p99,
+                "p99_including_failures": self.latency_p99_including_failures,
                 "min": self.latency_min,
                 "max": self.latency_max,
                 "stdev": self.latency_stdev,
@@ -266,6 +286,9 @@ def aggregate(
     metrics.failed_requests = len(results) - len(ok)
     metrics.failure_rate = round(metrics.failed_requests / len(results), 4)
     metrics.unstable = metrics.failure_rate > max_failure_rate
+    metrics.sample_size = len(ok)
+    metrics.p99_reliable = len(ok) >= 100
+    metrics.estimated_token_requests = sum(1 for r in ok if r.usage_source != "server")
 
     for r in results:
         if not r.success:
@@ -289,6 +312,13 @@ def aggregate(
         metrics.latency_min = min(latencies)
         metrics.latency_max = max(latencies)
         metrics.latency_stdev = _safe_stdev(latencies)
+        # 失败请求（尤其超时）不进上面这组延迟，会让高并发档的 P99 看起来
+        # 比实际好。这里给一个包含失败耗时的下界，单独暴露，不改变原字段。
+        all_latencies = latencies + [
+            r.total_latency for r in results
+            if not r.success and r.total_latency is not None
+        ]
+        metrics.latency_p99_including_failures = percentile(all_latencies, 99)
 
     # ---- 首 token 延迟 ----
     ttfts = [r.ttft for r in ok if r.ttft is not None]
@@ -330,8 +360,12 @@ def aggregate(
 
 
 def summarize_run(stages: List[StageMetrics]) -> Dict[str, Any]:
-    """跨档位汇总，用于报告结论段。"""
-    valid = [s for s in stages if s.success_requests > 0]
+    """跨档位汇总，用于报告结论段。
+
+    不稳定档位（失败率超过阈值）不参与「最佳吞吐」评选：一个 19% 请求
+    失败的档位不该被写成峰值吞吐。
+    """
+    valid = [s for s in stages if s.success_requests > 0 and not s.unstable]
     if not valid:
         return {
             "best_throughput": None,

@@ -14,8 +14,7 @@ import csv
 import json
 import logging
 import platform
-import time
-from dataclasses import asdict
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -59,19 +58,48 @@ CSV_COLUMNS = [
 
 
 def new_run_id(prefix: str = "run") -> str:
-    """生成按时间排序的 run id，如 ``run-20260518-143002``。"""
-    return f"{prefix}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    """生成按时间排序的 run id，如 ``run-20260518-143002-a1b2c3``。
+
+    只到秒会让同一秒提交的两个任务共用目录并静默覆盖结果；后缀用
+    随机串而不是计数器，多进程并发也不会撞。
+    """
+    return (
+        f"{prefix}-{datetime.now().strftime('%Y%m%d-%H%M%S')}-"
+        f"{uuid.uuid4().hex[:6]}"
+    )
 
 
 def environment_info() -> Dict[str, Any]:
-    """记录环境信息。报告里要能说明「这个数是哪台机器跑的」。"""
-    return {
+    """记录环境信息。报告里要能说明「这个数是哪台机器跑的」。
+
+    报告正文声称包含「GPU model and driver」，但旧实现只有 CPU/OS，
+    读者无法判断数字来自哪张卡。这里补上 GPU 列表与驱动版本；
+    nvidia-smi 不可用时安静跳过，不影响无 GPU 环境。
+    """
+    info: Dict[str, Any] = {
         "platform": platform.platform(),
         "python": platform.python_version(),
         "processor": platform.processor() or "unknown",
         "machine": platform.machine(),
         "hostname": platform.node(),
     }
+    try:
+        from monitor.gpu import query_gpus
+
+        probe = query_gpus()
+        if probe.get("available"):
+            info["gpu"] = [
+                {
+                    "index": g.index,
+                    "name": g.name,
+                    "driver_version": g.driver_version,
+                    "memory_total_mib": g.memory_total_mib,
+                }
+                for g in probe["gpus"]
+            ]
+    except Exception:  # 环境信息不是压测的关键路径
+        pass
+    return info
 
 
 def _stage_row(stage: StageMetrics) -> Dict[str, Any]:

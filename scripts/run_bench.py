@@ -72,6 +72,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="并发梯度，逗号分隔，如 1,2,4,8,16,32",
     )
+    parser.add_argument(
+        "--requests-per-level",
+        type=int,
+        default=None,
+        help="每档位请求总数。默认 max(16, 2*并发)；样本太少时 P99 没有意义",
+    )
+    parser.add_argument(
+        "--seed", type=int, default=None, help="prompt 采样与请求顺序的随机种子（默认 42）"
+    )
     parser.add_argument("--max-tokens", type=int, default=None, help="单请求最大生成 token 数")
     parser.add_argument("--timeout", type=float, default=None, help="单请求超时（秒）")
     parser.add_argument("--warmup", type=int, default=None, help="每档位预热请求数")
@@ -149,14 +158,26 @@ def apply_overrides(args: argparse.Namespace) -> None:
     """把命令行参数写回全局配置。"""
     if args.levels:
         try:
-            BENCH.concurrency_levels = [
-                int(x) for x in args.levels.split(",") if x.strip()
-            ]
+            levels = [int(x) for x in args.levels.split(",") if x.strip()]
         except ValueError as exc:
             raise SystemExit(f"--levels 格式错误：{exc}") from exc
+        if not levels or any(level < 1 for level in levels):
+            raise SystemExit("--levels 必须是逗号分隔的正整数，例如 1,2,4,8")
+        # 重复档位会让报告出现同并发数的多行，去重后升序
+        BENCH.concurrency_levels = sorted(set(levels))
+    if args.requests_per_level is not None:
+        if args.requests_per_level < 1:
+            raise SystemExit("--requests-per-level 必须 >= 1")
+        BENCH.requests_per_level = args.requests_per_level
+    if args.seed is not None:
+        BENCH.seed = args.seed
     if args.max_tokens is not None:
+        if args.max_tokens < 1:
+            raise SystemExit("--max-tokens 必须 >= 1")
         BENCH.max_tokens = args.max_tokens
     if args.timeout is not None:
+        if args.timeout <= 0:
+            raise SystemExit("--timeout 必须 > 0")
         BENCH.timeout = args.timeout
     if args.warmup is not None:
         BENCH.warmup_requests = args.warmup

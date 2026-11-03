@@ -111,9 +111,14 @@ class TestRunId:
     def test_format(self):
         rid = new_run_id()
         assert rid.startswith("run-")
-        # run-YYYYMMDD-HHMMSS
-        assert len(rid) == len("run-20260518-143002")
-        assert rid.count("-") == 2
+        # run-YYYYMMDD-HHMMSS-xxxxxx：秒级时间戳 + 6 位随机后缀
+        assert len(rid) == len("run-20260518-143002-a1b2c3")
+        assert rid.count("-") == 3
+
+    def test_unique_within_one_second(self):
+        """同一秒内连续生成也不能撞：撞了就会静默覆盖结果。"""
+        ids = {new_run_id() for _ in range(200)}
+        assert len(ids) == 200
 
     def test_unique_across_prefixes(self):
         assert new_run_id("a") != new_run_id("b")

@@ -55,6 +55,16 @@ class EngineTarget:
         """去掉尾部斜杠，保证拼接 path 时不会出现双斜杠。"""
         return self.base_url.rstrip("/")
 
+    def api_base(self) -> str:
+        """返回以 ``/v1`` 结尾的 OpenAI 兼容基址。
+
+        ``base_url`` 写成 ``http://host:8000`` 或 ``http://host:8000/v1``
+        都是合法的；早期版本固定再拼一次 ``/v1``，导致后一种写法请求
+        ``/v1/v1/chat/completions`` 并全部 404。
+        """
+        url = self.normalized_base_url()
+        return url if url.endswith("/v1") else f"{url}/v1"
+
 
 # --------------------------------------------------------------------------
 # 压测参数
@@ -66,8 +76,17 @@ class BenchConfig:
     # 并发梯度：依次按这些并发数跑，得到「并发 - 吞吐 - 延迟」曲线
     concurrency_levels: List[int] = field(default_factory=lambda: [1, 2, 4, 8, 16, 32])
 
-    # 每个并发档位发起的请求总数（None 表示 = 并发数，即每路请求各跑一次）
+    # 每个并发档位发起的请求总数。None 表示按 requests_for() 的默认策略：
+    # max(16, 2 * concurrency)。原先默认「= 并发数」会让并发 1 的档位只有
+    # 1 个样本，P99 退化成最大值，却仍被当成尾延迟结论引用。
     requests_per_level: Optional[int] = None
+
+    # 随机种子：prompt 采样与请求顺序都用它，保证结果可复现
+    seed: int = 42
+
+    # 可选 prompt 池。为空时所有请求共用上面的 prompt；填入多条可避免
+    # 所有请求命中服务端 prefix cache 导致 TTFT 系统性偏低。
+    prompt_pool: List[str] = field(default_factory=list)
 
     # 每档位预热请求数，预热结果不计入统计
     warmup_requests: int = 2
@@ -92,6 +111,16 @@ class BenchConfig:
 
     # 单档位失败请求占比超过该阈值时标记该档位为不稳定
     max_failure_rate: float = 0.2
+
+    def requests_for(self, concurrency: int) -> int:
+        """该并发档位应发起的请求总数。
+
+        样本量低于 ~100 时 P99 基本没有意义（它只是第 N 个顺序统计量），
+        所以默认至少 16 个，并随并发放大到 2 倍，且不少于并发数本身。
+        """
+        if self.requests_per_level:
+            return max(self.requests_per_level, concurrency)
+        return max(16, 2 * concurrency)
 
 
 # --------------------------------------------------------------------------

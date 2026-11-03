@@ -31,7 +31,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from metrics.stats import StageMetrics, percentile
+from metrics.stats import StageMetrics
 
 logger = logging.getLogger(__name__)
 
@@ -360,10 +360,16 @@ def _stage_from_dict(raw: Dict[str, Any]) -> StageMetrics:
         failed_requests=raw.get("failed_requests", 0),
         failure_rate=raw.get("failure_rate", 0.0),
         unstable=raw.get("unstable", False),
+        sample_size=raw.get("sample_size", raw.get("success_requests", 0)),
+        p99_reliable=raw.get(
+            "p99_reliable", raw.get("success_requests", 0) >= 100
+        ),
+        estimated_token_requests=raw.get("estimated_token_requests", 0),
         latency_mean=latency.get("mean"),
         latency_p50=latency.get("p50"),
         latency_p95=latency.get("p95"),
         latency_p99=latency.get("p99"),
+        latency_p99_including_failures=latency.get("p99_including_failures"),
         latency_min=latency.get("min"),
         latency_max=latency.get("max"),
         latency_stdev=latency.get("stdev"),

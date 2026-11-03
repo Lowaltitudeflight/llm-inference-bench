@@ -6,7 +6,7 @@
 [![Forks](https://img.shields.io/github/forks/Lowaltitudeflight/llm-inference-bench?style=flat&color=blue)](https://github.com/Lowaltitudeflight/llm-inference-bench/network/members)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/tests-313%20passed-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-326%20passed-brightgreen.svg)](tests/)
 [![Version](https://img.shields.io/badge/release-v0.1.0-orange.svg)](https://github.com/Lowaltitudeflight/llm-inference-bench/releases)
 
 **English** ｜ [简体中文](README.zh-CN.md)
@@ -26,8 +26,9 @@ pip install -r requirements.txt
 python scripts/mock_engine.py --port 8102 &
 export NO_PROXY="127.0.0.1,localhost"
 export VLLM_BASE_URL="http://127.0.0.1:8102" VLLM_MODEL="mock-72b"
-python scripts/run_bench.py --engine vllm --quant fp16 --levels 1,2,4,8,16,32
+python scripts/run_bench.py --engine vllm --quant fp16 --levels 1,2,4,8,16,32 --report
 # → data/results/<run>/report.html  (self-contained HTML, opens directly on an isolated network)
+# --report is what writes it: the sweep alone only leaves JSON/CSV behind.
 ```
 
 | | |
@@ -37,7 +38,7 @@ python scripts/run_bench.py --engine vllm --quant fp16 --levels 1,2,4,8,16,32
 | **Quantisation** | FP16 / BF16 / INT8 / AWQ / GPTQ comparison + throughput per GiB of VRAM |
 | **Output** | Markdown report · self-contained HTML report (inline SVG, no CDN) · Prometheus metrics · Grafana dashboard |
 | **Measured** | Benchmarked on **real hardware** (RTX 4060 Laptop, 8 GB): **30.8 tokens/s** peak, saturating at concurrency 2 — see [Measured results](#measured-results) |
-| **Verified** | 313 unit tests, ~7 s to run; full pipeline verifiable without a GPU |
+| **Verified** | 326 unit tests (~90 s, mostly the API suite); full pipeline verifiable without a GPU |
 | **Deployable** | One-command Docker Compose monitoring stack; works offline and on isolated networks |
 
 ### How it differs from "just writing a load-test script"
@@ -194,8 +195,10 @@ python scripts/run_bench.py \
 # Real Ollama (quantisation level is part of the model name)
 python scripts/run_bench.py \
     --engine ollama --base-url http://127.0.0.1:11434 \
-    --model qwen2.5:7b --quant q4_K_M
+    --model qwen2.5:7b --quant q4_K_M --report
 ```
+
+`--base-url` accepts both `http://host:8000` and `http://host:8000/v1`; the client normalises it. (Older versions appended `/v1` unconditionally, so either the docs' `/v1` form 404'd on every request.)
 
 ### Quantisation comparison
 
@@ -212,6 +215,7 @@ python scripts/run_bench.py --run-id quant-72b --output-dir data/results \
 ### Re-generating a report from existing results
 
 ```bash
+# --from-results takes the directory that holds the run's *.json files
 python scripts/run_bench.py --report-only --from-results data/results/demo
 ```
 
@@ -282,7 +286,7 @@ llm-inference-bench/
 │   ├── mock_engine.py        # OpenAI-compatible mock engine (verify without a GPU)
 │   └── gen_grafana_dashboard.py
 ├── deploy/                   # Dockerfile / docker-compose / Prometheus / Grafana
-├── tests/                    # 313 unit tests
+├── tests/                    # 326 unit tests
 └── data/results/             # Benchmark artefacts (JSON / CSV / reports)
 ```
 
@@ -312,7 +316,7 @@ Both `report.md` and `report.html` are produced.
 >
 > - [`report.md`](data/results/run-20261009-103334/report.md) — full 7-section report (readable on GitHub)
 > - [`report.html`](data/results/run-20261009-103334/report.html) — self-contained chart version (inline SVG, no external assets)
-> - [`ollama__qwen2.5_7b__q4_k_m.json`](data/results/run-20261009-103334/ollama__qwen2.5_7b__q4_k_m.json) — raw results, feed it to `--report-only` to regenerate
+> - [`ollama__qwen2.5_7b__q4_k_m.json`](data/results/run-20261009-103334/ollama__qwen2.5_7b__q4_k_m.json) — raw results; point `--report-only --from-results` at its directory to regenerate
 >
 > ⓘ The `result_stem` field inside that JSON still uses the pre-fix format
 > (`ollama__qwen2.5:7b__q4_k_m`, **with a colon**), while the actual filename was produced by the
