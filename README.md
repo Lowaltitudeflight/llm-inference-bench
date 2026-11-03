@@ -37,7 +37,7 @@ python scripts/run_bench.py --engine vllm --quant fp16 --levels 1,2,4,8,16,32 --
 | **Metrics** | throughput (tokens/s) · TTFT · TPOT · P50/P95/P99 tail latency · peak VRAM |
 | **Quantisation** | FP16 / BF16 / INT8 / AWQ / GPTQ comparison + throughput per GiB of VRAM |
 | **Output** | Markdown report · self-contained HTML report (inline SVG, no CDN) · Prometheus metrics · Grafana dashboard |
-| **Measured** | Benchmarked on **real hardware** (RTX 4060 Laptop, 8 GB): **30.8 tokens/s** peak under the pre-fix runner — see the caveat in [Measured results](#measured-results); a re-run with the current timer is pending |
+| **Measured** | Benchmarked on **real hardware** (RTX 4060 Laptop, 8 GB, `qwen2.5:7b` Q4_K_M): **50.0 tokens/s** peak at concurrency 16, flat from c2 onward while TTFT grows linearly — see [Measured results](#measured-results) |
 | **Verified** | 326 unit tests (~90 s, mostly the API suite); full pipeline verifiable without a GPU |
 | **Deployable** | One-command Docker Compose monitoring stack; works offline and on isolated networks |
 
@@ -310,14 +310,43 @@ Both `report.md` and `report.html` are produced.
 
 ## Measured results
 
-> ⚠️ **This run predates the timing fix.** It was produced by the runner that built a client per
-> request inside the timed window, so its throughput is understated (roughly 27-38% by the repo's own
-> arithmetic) and its "saturates at concurrency 2" reading may be an artefact. The artifacts are kept
-> as published history, not as a current headline; re-run with the current code before quoting it.
+**Run of 2026-11-03 (current code).** Real hardware, real model: an 8 GiB RTX 4060 Laptop running
+Ollama `qwen2.5:7b` Q4_K_M, 256 output tokens, 16 requests per level. Artefacts:
+[`report.md`](data/results/rerun-20261103/report.md) ·
+[`report.html`](data/results/rerun-20261103/report.html) ·
+[raw JSON](data/results/rerun-20261103/ollama__qwen2.5_7b__q4_k_m.json).
+
+| Concurrency | Output tok/s | TTFT mean | TPOT mean | P99 latency | n |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 43.3 | 167 ms | 21.5 ms | 2.25 s | 16 |
+| 2 | 48.6 | 1094 ms | 19.7 ms | 3.85 s | 16 |
+| 4 | 49.4 | 2957 ms | 19.7 ms | 7.55 s | 16 |
+| 8 | 49.8 | 6687 ms | 19.7 ms | 14.94 s | 16 |
+| 16 | **50.0** | 14129 ms | 19.8 ms | 29.77 s | 32 |
+| 32 | 49.9 | 29095 ms | 19.8 ms | 59.51 s | 64 |
+
+What this run says:
+
+- **The card is at its bandwidth ceiling.** TPOT is 19.7 ms at every level: per-token decode speed does
+  not change with load. Aggregate throughput accordingly flattens at ~50 tok/s from c2.
+- **Everything above c2 is queueing.** TTFT grows almost exactly linearly (1.1 → 2.9 → 6.7 → 14.1 → 29.1 s)
+  while throughput stays flat. Adding concurrency buys no throughput here; it only buys waiting.
+- **Pick concurrency from the SLO, not the peak.** If TTFT must stay under 2 s, this machine supports
+  **c2**, even though the peak throughput number sits at c16. `sample_size` and `p99_reliable` are in
+  the JSON so a reader can see that n=16 is too small for a real P99 claim.
+
+> This run replaces the 2026-10-09 headline, which was produced by a runner that built a client per
+> request inside the timed window. That run is kept below as history: its artefacts are unchanged and
+> its numbers are the "before" side of the fix.
+
+### History: run of 2026-10-09 (pre-timing-fix)
+
+> ⚠️ Throughput here is understated (~27-38% by the repo's own arithmetic) and "saturates at
+> concurrency 2" may be an artefact of client construction inside the timed window. Kept as published
+> history, not as a current headline.
 >
-> The run below used **real hardware and a real model**, not the mock: an 8 GiB consumer GPU running
-> Ollama with `qwen2.5:7b` (Q4_K_M). The raw artefacts are **published in this repository** so you can
-> verify them, or recompute the report yourself:
+> The run used the same hardware and model; the raw artefacts are **published in this repository** so
+> you can verify them, or recompute the report yourself:
 >
 > - [`report.md`](data/results/run-20261009-103334/report.md) — full 7-section report (readable on GitHub)
 > - [`report.html`](data/results/run-20261009-103334/report.html) — self-contained chart version (inline SVG, no external assets)

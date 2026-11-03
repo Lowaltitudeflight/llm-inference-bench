@@ -54,6 +54,13 @@
 
 ### Added
 
+- **Re-run on real hardware after the timing fix** (`data/results/rerun-20261103/`,
+  RTX 4060 Laptop 8 GB + `qwen2.5:7b` Q4_K_M). Peak throughput **30.8 → 50.0 tok/s**
+  (+62%), and the shape changed: throughput now plateaus at ~50 tok/s from **c2**
+  instead of c8, while TPOT stays flat at 19.7 ms and TTFT grows linearly
+  (1.1 s at c2 → 29.1 s at c32). The card was bandwidth-bound all along; the old
+  "saturates at c8" curve was measuring client construction.
+
 - `pyproject.toml`：`pip install .` 可用，`llmbench` 命令行入口，
   `requires-python >= 3.10`，依赖加上限。
 - 环境信息补 GPU 型号 / 驱动版本，报告里 "GPU model and driver" 不再落空。
