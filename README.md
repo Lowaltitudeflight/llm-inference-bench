@@ -37,7 +37,7 @@ python scripts/run_bench.py --engine vllm --quant fp16 --levels 1,2,4,8,16,32 --
 | **Metrics** | throughput (tokens/s) · TTFT · TPOT · P50/P95/P99 tail latency · peak VRAM |
 | **Quantisation** | FP16 / BF16 / INT8 / AWQ / GPTQ comparison + throughput per GiB of VRAM |
 | **Output** | Markdown report · self-contained HTML report (inline SVG, no CDN) · Prometheus metrics · Grafana dashboard |
-| **Measured** | Benchmarked on **real hardware** (RTX 4060 Laptop, 8 GB): **30.8 tokens/s** peak, saturating at concurrency 2 — see [Measured results](#measured-results) |
+| **Measured** | Benchmarked on **real hardware** (RTX 4060 Laptop, 8 GB): **30.8 tokens/s** peak under the pre-fix runner — see the caveat in [Measured results](#measured-results); a re-run with the current timer is pending |
 | **Verified** | 326 unit tests (~90 s, mostly the API suite); full pipeline verifiable without a GPU |
 | **Deployable** | One-command Docker Compose monitoring stack; works offline and on isolated networks |
 
@@ -310,6 +310,11 @@ Both `report.md` and `report.html` are produced.
 
 ## Measured results
 
+> ⚠️ **This run predates the timing fix.** It was produced by the runner that built a client per
+> request inside the timed window, so its throughput is understated (roughly 27-38% by the repo's own
+> arithmetic) and its "saturates at concurrency 2" reading may be an artefact. The artifacts are kept
+> as published history, not as a current headline; re-run with the current code before quoting it.
+>
 > The run below used **real hardware and a real model**, not the mock: an 8 GiB consumer GPU running
 > Ollama with `qwen2.5:7b` (Q4_K_M). The raw artefacts are **published in this repository** so you can
 > verify them, or recompute the report yourself:
